@@ -10,7 +10,7 @@ import { AssessmentPanel, Provenance, SignalPanel } from './Panels';
 const REFRESH_MS = 30_000;
 
 export default function App() {
-  const [symbol, setSymbol] = useState('AIOK');
+  const [symbol, setSymbol] = useState('');
   const [timeframe, setTimeframe] = useState('5Min');
   const [sessions, setSessions] = useState<'regular' | 'extended'>('regular');
   const [zone, setZone] = useState<ZoneKey>('ny');
@@ -25,7 +25,11 @@ export default function App() {
 
   useEffect(() => { api<{ credentials_configured: boolean; feed: string }>('/api/health').then(setHealth).catch(e => setError(e.message)); }, []);
 
+  // Start on the first watchlist symbol; no ticker is built in.
+  useEffect(() => { api<{ symbols: string[] }>('/api/watchlist').then(r => { if (r.symbols.length) setSymbol(s => s || r.symbols[0]); }).catch(() => undefined); }, []);
+
   const load = useCallback(async () => {
+    if (!symbol) return;
     setLoading(true);
     try {
       const params = new URLSearchParams({ symbol, timeframe, sessions });
@@ -52,7 +56,7 @@ export default function App() {
       <Sidebar symbol={symbol} onPick={s => { setSymbol(s); setReplayAt(null); }} />
       <main>
         <header className="toolbar">
-          <h1>{symbol}</h1>
+          <h1>{symbol || 'No symbol selected'}</h1>
           <nav className="tabs" aria-label="Screens">
             {(['chart', 'plan', 'backtest', 'scanner'] as const).map(s => <button key={s} aria-pressed={screen === s} onClick={() => setScreen(s)}>{{ chart: 'Chart & Signals', plan: 'Entry, Exit & Price Projections', backtest: 'Replay & Backtest', scanner: 'Next Day Watchlist' }[s]}</button>)}
           </nav>
@@ -64,6 +68,7 @@ export default function App() {
         {health && !health.credentials_configured && <p className="banner error">Alpaca credentials are not configured on the backend. Add ALPACA_API_KEY and ALPACA_API_SECRET to backend/.env and restart. No data will be shown until then.</p>}
         {error && <p className="banner error" role="alert">{error}</p>}
         {data?.error && <p className="banner error" role="alert">Data request failed: {data.error}{data.candles.length ? ' Showing cached candles from the last successful fetch.' : ''}</p>}
+        {!symbol && <p className="banner info">Search for a symbol or pick one from your watchlist to load its chart.</p>}
         {data && <Provenance data={data} zone={zone} hashOk={hashOk} />}
         {data && data.candles.length === 0 && <p className="banner warn">No candles returned for {symbol} on the {data.feed.toUpperCase()} feed in this range. Nothing has been substituted.</p>}
         {data && data.candles.length > 0 && screen !== 'backtest' && screen !== 'scanner' && (

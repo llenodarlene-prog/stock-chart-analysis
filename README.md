@@ -189,9 +189,9 @@ The blocking reasons are listed in the app.
   - new news: review
 - **Backtests.** Overnight and swing trades are tested separately for each setup, with in-sample and out-of-sample splits. By default they run on a deterministic sample spread across the whole directory rather than hand-picked symbols. Setups are detected using only data available at each day's close.
 
-## Position Note
+## Symbols and Positions
 
-No positions are pre-loaded. AIOK is not stored as an open position: you reported selling it at $13.50.
+No ticker is built into the app. The chart opens on the first symbol in your watchlist, or waits for you to search. No positions are pre-loaded or assumed for any symbol.
 
 ## Known Limitations
 

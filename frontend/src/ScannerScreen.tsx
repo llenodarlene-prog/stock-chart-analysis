@@ -50,7 +50,7 @@ export default function ScannerScreen({ zone }: { zone: ZoneKey }) {
         )}
         <div className="actions">
           <button onClick={() => act('universe', async () => { await api('/api/universe/refresh', { method: 'POST' }); await loadUniverse(); })} disabled={!!busy}>{busy === 'universe' ? 'Refreshing…' : 'Refresh GoTrade directory'}</button>
-          <input value={symbols} onChange={e => setSymbols(e.target.value)} placeholder="Optional: limit to symbols, e.g. AIOK, AAPL" style={{ maxWidth: 320 }} aria-label="Limit scan to symbols" />
+          <input value={symbols} onChange={e => setSymbols(e.target.value)} placeholder="Optional: limit to symbols, e.g. AAPL, MSFT" style={{ maxWidth: 320 }} aria-label="Limit scan to symbols" />
           <button className="primary" disabled={!!busy || !universe?.count} onClick={() => act('scan', async () => { setScan(await api<Scan>('/api/scanner/run', { method: 'POST', body: JSON.stringify({ symbols: list() }) })); })}>{busy === 'scan' ? 'Scanning (first run downloads history)…' : 'Run scan'}</button>
           {scan?.id && <button disabled={!!busy} onClick={() => act('reassess', async () => { setScan(await api<Scan>(`/api/scanner/${scan.id}/reassess`, { method: 'POST' })); })}>{busy === 'reassess' ? 'Checking…' : 'Reassess after news and opening gaps'}</button>}
         </div>
