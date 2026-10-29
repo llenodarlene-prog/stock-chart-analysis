@@ -24,7 +24,7 @@ export default function Chart({ data, zone, toggles, overlays = [] }: { data: Ch
       autoSize: true,
       layout: { background: { type: ColorType.Solid, color: '#ffffff' }, textColor: '#202124', panes: { separatorColor: '#dadce0' } },
       grid: { vertLines: { color: '#f1f3f4' }, horzLines: { color: '#f1f3f4' } },
-      localization: { timeFormatter: (t: Time) => `${formatter(zone, true)(t)} ${formatter(zone, false)(t)}` },
+      localization: { locale: 'en-US', timeFormatter: (t: Time) => `${formatter(zone, true)(t)} ${formatter(zone, false)(t)}` },
       timeScale: { timeVisible: data.timeframe !== '1Day', secondsVisible: false, tickMarkFormatter: (t: Time, type: TickMarkType) => formatter(zone, data.timeframe === '1Day' || type < TickMarkType.Time)(t) },
     });
     chartRef.current = chart;

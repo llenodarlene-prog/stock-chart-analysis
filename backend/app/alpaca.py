@@ -101,6 +101,40 @@ class AlpacaClient:
                 return bars
             params = {**params, "page_token": token}
 
+    def bars_multi(self, symbols: list[str], timeframe: str, start: int, end: int) -> dict[str, list[Bar]]:
+        """Raw bars for many symbols in one paginated request."""
+        from datetime import datetime, timezone
+
+        iso = lambda ts: datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        params = {"symbols": ",".join(symbols), "timeframe": timeframe, "start": iso(start), "end": iso(end), "limit": 10000, "adjustment": "raw", "feed": self.settings.feed, "sort": "asc"}
+        out: dict[str, list[Bar]] = {s: [] for s in symbols}
+        while True:
+            data = self._get(f"{self.settings.data_host}/v2/stocks/bars", params)
+            for symbol, items in (data.get("bars") or {}).items():
+                for raw in items or []:
+                    out.setdefault(symbol, []).append(Bar(_iso_to_epoch(raw["t"]), float(raw["o"]), float(raw["h"]), float(raw["l"]), float(raw["c"]), int(raw["v"]), raw.get("n"), raw.get("vw")))
+            token = data.get("next_page_token")
+            if not token:
+                return out
+            params = {**params, "page_token": token}
+
+    def news(self, symbols: list[str], start_iso: str) -> list[dict]:
+        """Articles from Alpaca's news API (GET /v1beta1/news), newest first."""
+        params = {"symbols": ",".join(symbols), "start": start_iso, "limit": 50, "sort": "desc"}
+        items: list[dict] = []
+        for _ in range(10):
+            data = self._get(f"{self.settings.data_host}/v1beta1/news", params)
+            items.extend(data.get("news") or [])
+            token = data.get("next_page_token")
+            if not token:
+                break
+            params = {**params, "page_token": token}
+        return [{k: n.get(k) for k in ("id", "headline", "source", "author", "created_at", "updated_at", "url", "symbols", "summary")} for n in items]
+
+    def snapshots(self, symbols: list[str]) -> dict:
+        """Latest trade, quote and bars per symbol (GET /v2/stocks/snapshots)."""
+        return self._get(f"{self.settings.data_host}/v2/stocks/snapshots", {"symbols": ",".join(symbols), "feed": self.settings.feed})
+
     def corporate_actions(self, symbol: str, start_date: str, end_date: str) -> list[dict]:
         params = {"symbols": symbol, "start": start_date, "end": end_date, "limit": 1000}
         actions: list[dict] = []

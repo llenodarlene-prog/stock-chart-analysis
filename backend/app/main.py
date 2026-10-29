@@ -243,3 +243,90 @@ def delete_plan(plan_id: int) -> dict:
 @app.get("/api/signals/history")
 def signal_history(symbol: str, timeframe: str = "5Min", sessions_mode: str = Query("regular", alias="sessions")) -> dict:
     return {"signals": store.signal_history(_symbol(symbol), timeframe, sessions_mode)}
+
+
+# Next Trading Day Watchlist scanner ---------------------------------------------------
+from . import scanner  # noqa: E402
+
+
+@app.post("/api/universe/refresh")
+def refresh_universe() -> dict:
+    try:
+        return scanner.refresh_universe(store)
+    except (AlpacaError, Exception) as exc:  # network errors from the directory fetch
+        raise HTTPException(502, f"Could not refresh the GoTrade directory: {exc}")
+
+
+@app.get("/api/universe")
+def get_universe() -> dict:
+    rows = store.universe()
+    availability = store.availability()
+    head = rows[0] if rows else {}
+    return {"count": len(rows), "source_url": head.get("source_url"), "source_last_modified": head.get("source_last_modified"), "fetched_at": head.get("fetched_at"),
+            "confirmed_available": sum(1 for a in availability.values() if a["available"]), "confirmed_unavailable": sum(1 for a in availability.values() if not a["available"]),
+            "note": "Universe is the official GoTrade directory. Whether a symbol is open to your account is confirmed by you, not inferred from Alpaca."}
+
+
+@app.post("/api/availability/{symbol}")
+def set_availability(symbol: str, payload: dict = Body(...)) -> dict:
+    store.set_availability(_symbol(symbol), bool(payload.get("available")), str(payload.get("note", ""))[:200])
+    return store.availability()[_symbol(symbol)]
+
+
+@app.post("/api/scanner/run")
+def run_scanner(payload: dict = Body(default={})) -> dict:
+    cfg = replace(scanner.ScanConfig(), **{k: v for k, v in (payload.get("config") or {}).items() if k in scanner.ScanConfig.__dataclass_fields__})
+    symbols = [_symbol(s) for s in payload.get("symbols") or []] or None
+    try:
+        result = scanner.run_scan(client, store, AnalysisConfig.load(), cfg, int(time.time()), symbols)
+    except AlpacaError as exc:
+        raise HTTPException(502, str(exc))
+    result["id"] = store.save_scan(result)
+    store.update_scan(result["id"], result)
+    return result
+
+
+@app.get("/api/scanner/latest")
+def latest_scan() -> dict:
+    return store.scan() or {"candidates": [], "message": "No scan has been run yet."}
+
+
+@app.post("/api/scanner/{scan_id}/reassess")
+def reassess_scan(scan_id: int) -> dict:
+    scan = store.scan(scan_id)
+    if not scan:
+        raise HTTPException(404, "Scan not found.")
+    try:
+        updated = scanner.reassess(scan, client, int(time.time()))
+    except AlpacaError as exc:
+        raise HTTPException(502, str(exc))
+    store.update_scan(scan_id, {k: v for k, v in updated.items() if k not in ("id",)})
+    return updated
+
+
+@app.get("/api/scanner/chart/{symbol}")
+def scanner_chart(symbol: str) -> dict:
+    """Daily candles built from the cached 30-minute bars the scan used."""
+    symbol = _symbol(symbol)
+    now = int(time.time())
+    cfg = scanner.ScanConfig()
+    done = [c for c in scanner.daily_candles(store.bars_30m(symbol, settings.feed, now - cfg.lookback_days * 86400), now)]
+    ind = compute_all(done, AnalysisConfig.load(), daily=True)
+    return {"symbol": symbol, "feed": settings.feed, "candles": [c.to_dict() for c in done], "indicators": {k: ind[k] for k in ("ema_fast", "ema_slow")}, "data_hash": sessions.data_hash(done)}
+
+
+@app.post("/api/scanner/backtest")
+def scanner_backtest(payload: dict = Body(default={})) -> dict:
+    cfg = replace(scanner.ScanConfig(), **{k: v for k, v in (payload.get("config") or {}).items() if k in scanner.ScanConfig.__dataclass_fields__})
+    universe = [u["symbol"] for u in store.universe()]
+    symbols = [_symbol(s) for s in payload.get("symbols") or []]
+    if not symbols:
+        # A deterministic spread across the whole universe, not a hand-picked list.
+        step = max(1, len(universe) // int(payload.get("sample_size", 150)))
+        symbols = universe[::step]
+    now = int(time.time())
+    errors = scanner.ensure_30m(client, store, symbols, cfg, now)
+    result = scanner.backtest(store, settings.feed, symbols, AnalysisConfig.load(), cfg, now)
+    result["errors"] = errors
+    result["sampled_symbols"] = symbols[:200]
+    return result

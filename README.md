@@ -156,6 +156,39 @@ The blocking reasons are listed in the app.
 - Signals first seen on a live recent candle are stored with that timestamp. They form a forward paper-test log.
 - Do not tune the rules to reproduce one stock's past move. Check any change on other symbols, on the out-of-sample split, and in forward paper testing first.
 
+## Next Trading Day Watchlist
+
+- **Universe.** The scan universe is the official [GoTrade US stock directory](https://www.heygotrade.com/en/us-stock/). Select "Refresh GoTrade directory" to load it. The app stores the page's HTTP `Last-Modified` date and the fetch time. A page that fails or parses to fewer than 100 symbols leaves the previous universe in place.
+- **Account availability.** Whether a stock is open to your account is your manual confirmation ("I can trade it in GoTrade" or "Not available to me"). Alpaca tradability is never used as a substitute.
+- **Data.** The scanner uses regular-session 30-minute IEX bars. Daily candles are built from them, so the scan, the annotated charts, and both backtests share one dataset. The first full-universe run downloads about 180 days of history and takes several minutes. Later runs only fetch recent bars.
+- **Setups.** These rules are evaluated on completed daily candles only. The thresholds live in `ScanConfig` in `backend/app/scanner.py`.
+
+  | Setup | Rule |
+  |---|---|
+  | Developing breakout | Close within 0.75 ATR below confirmed resistance, above EMA 20, swing low intact, and the 5-day range tightening. Quiet names qualify; no big gain or volume surge is required. |
+  | Momentum continuation | Swing trend up, close above EMA 9 above EMA 20, a close in the top quarter of the day's range, and relative volume of at least 1.2. A high daily gain or RSI never rejects a candidate. Extension above EMA 20 is reported and sets the stop distance, and therefore the size. |
+  | Uptrend pullback | Swing trend up, swing low intact, at least 1 ATR below the 10-day high, and within 1 ATR of EMA 20. |
+
+- **Candidates.** Each candidate has:
+  - An annotated daily chart showing the trigger, invalidation, and targets.
+  - The evidence behind the setup.
+  - Liquidity: IEX dollar volume and quoted spread, with thresholds.
+  - Data-quality status.
+  - Catalysts from Alpaca's news API, with source, time, and link. The app checks that the article exists; it does not judge the content.
+- **Two separate plans per candidate.**
+  - *Overnight to the next opening hour:* entry at today's close, invalidation on the opening print or any 30-minute low before 10:30 ET, and a time exit at 10:30 ET.
+  - *Multi-day swing:* entry on a daily close above the trigger, a daily-close invalidation, targets from observed structure, and a 10-day time stop.
+- **Count and ranking.**
+  - Up to 10 candidates, with at most 4 per setup so quiet setups are not crowded out.
+  - Fewer are returned when fewer meet every rule.
+  - Rank is an ordering by the number of optional confirmations met. It is not a probability, and no move size is promised.
+- **Reassessment.** "Reassess after news and opening gaps" checks the latest IEX trade and any news published after the scan. It marks each plan as one of:
+  - plan unchanged
+  - invalidated by gap
+  - extended: re-plan
+  - new news: review
+- **Backtests.** Overnight and swing trades are tested separately for each setup, with in-sample and out-of-sample splits. By default they run on a deterministic sample spread across the whole directory rather than hand-picked symbols. Setups are detected using only data available at each day's close.
+
 ## Position Note
 
 No positions are pre-loaded. AIOK is not stored as an open position: you reported selling it at $13.50.

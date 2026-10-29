@@ -28,6 +28,19 @@ CREATE TABLE IF NOT EXISTS signals (
   explanation TEXT, evidence TEXT, data_hash TEXT,
   UNIQUE (symbol, timeframe, sessions, kind, variant, bar_time));
 CREATE TABLE IF NOT EXISTS watchlist (symbol TEXT PRIMARY KEY, added_at REAL);
+CREATE TABLE IF NOT EXISTS bars_30m (
+  symbol TEXT NOT NULL, feed TEXT NOT NULL, t INTEGER NOT NULL,
+  o REAL, h REAL, l REAL, c REAL, v INTEGER, n INTEGER, vw REAL,
+  PRIMARY KEY (symbol, feed, t));
+CREATE TABLE IF NOT EXISTS bars_30m_coverage (
+  symbol TEXT NOT NULL, feed TEXT NOT NULL, start INTEGER, end INTEGER, fetched_at REAL,
+  PRIMARY KEY (symbol, feed));
+CREATE TABLE IF NOT EXISTS universe (
+  symbol TEXT PRIMARY KEY, name TEXT, source_url TEXT, source_last_modified TEXT, fetched_at REAL);
+CREATE TABLE IF NOT EXISTS availability (
+  symbol TEXT PRIMARY KEY, available INTEGER, confirmed_at REAL, note TEXT);
+CREATE TABLE IF NOT EXISTS scans (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, created_at REAL, data TEXT);
 CREATE TABLE IF NOT EXISTS plans (
   id INTEGER PRIMARY KEY AUTOINCREMENT, created_at REAL, updated_at REAL, data TEXT);
 """
@@ -103,6 +116,52 @@ class Store:
             item["evidence"] = json.loads(item["evidence"] or "{}")
             out.append(item)
         return out
+
+    # Scanner -----------------------------------------------------------------
+    def upsert_bars_30m(self, symbol: str, feed: str, bars: list[Bar]) -> None:
+        self.db.executemany("INSERT OR REPLACE INTO bars_30m VALUES (?,?,?,?,?,?,?,?,?,?)", [(symbol, feed, b.t, b.o, b.h, b.l, b.c, b.v, b.n, b.vw) for b in bars])
+        self.db.commit()
+
+    def bars_30m(self, symbol: str, feed: str, start: int) -> list[Bar]:
+        rows = self.db.execute("SELECT t,o,h,l,c,v,n,vw FROM bars_30m WHERE symbol=? AND feed=? AND t>=? ORDER BY t", (symbol, feed, start)).fetchall()
+        return [Bar(*row) for row in rows]
+
+    def coverage_30m(self, feed: str) -> dict[str, dict]:
+        return {r["symbol"]: dict(r) for r in self.db.execute("SELECT * FROM bars_30m_coverage WHERE feed=?", (feed,))}
+
+    def set_coverage_30m(self, symbols: list[str], feed: str, start: int, end: int) -> None:
+        now = time.time()
+        self.db.executemany("INSERT INTO bars_30m_coverage VALUES (?,?,?,?,?) ON CONFLICT(symbol,feed) DO UPDATE SET start=min(start,excluded.start), end=excluded.end, fetched_at=excluded.fetched_at", [(s, feed, start, end, now) for s in symbols])
+        self.db.commit()
+
+    def replace_universe(self, rows: list[tuple[str, str]], url: str, last_modified: str | None) -> None:
+        now = time.time()
+        self.db.execute("DELETE FROM universe")
+        self.db.executemany("INSERT INTO universe VALUES (?,?,?,?,?)", [(sym, name, url, last_modified, now) for sym, name in rows])
+        self.db.commit()
+
+    def universe(self) -> list[dict]:
+        return [dict(r) for r in self.db.execute("SELECT * FROM universe ORDER BY symbol")]
+
+    def set_availability(self, symbol: str, available: bool, note: str) -> None:
+        self.db.execute("INSERT OR REPLACE INTO availability VALUES (?,?,?,?)", (symbol, int(available), time.time(), note))
+        self.db.commit()
+
+    def availability(self) -> dict[str, dict]:
+        return {r["symbol"]: dict(r) for r in self.db.execute("SELECT * FROM availability")}
+
+    def save_scan(self, data: dict) -> int:
+        scan_id = self.db.execute("INSERT INTO scans (created_at, data) VALUES (?,?)", (time.time(), json.dumps(data))).lastrowid
+        self.db.commit()
+        return int(scan_id)
+
+    def update_scan(self, scan_id: int, data: dict) -> None:
+        self.db.execute("UPDATE scans SET data=? WHERE id=?", (json.dumps(data), scan_id))
+        self.db.commit()
+
+    def scan(self, scan_id: int | None = None) -> dict | None:
+        row = self.db.execute("SELECT * FROM scans WHERE id=?", (scan_id,)).fetchone() if scan_id else self.db.execute("SELECT * FROM scans ORDER BY id DESC LIMIT 1").fetchone()
+        return {"id": row["id"], "created_at": row["created_at"], **json.loads(row["data"])} if row else None
 
     # Watchlist and plans ----------------------------------------------------
     def watchlist(self) -> list[str]:

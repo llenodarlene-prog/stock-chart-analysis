@@ -4,6 +4,7 @@ import Chart, { type Toggles } from './Chart';
 import { candleHash } from './hash';
 import PlanScreen from './PlanScreen';
 import BacktestScreen from './BacktestScreen';
+import ScannerScreen from './ScannerScreen';
 import { AssessmentPanel, Provenance, SignalPanel } from './Panels';
 
 const REFRESH_MS = 30_000;
@@ -13,7 +14,7 @@ export default function App() {
   const [timeframe, setTimeframe] = useState('5Min');
   const [sessions, setSessions] = useState<'regular' | 'extended'>('regular');
   const [zone, setZone] = useState<ZoneKey>('ny');
-  const [screen, setScreen] = useState<'chart' | 'plan' | 'backtest'>('chart');
+  const [screen, setScreen] = useState<'chart' | 'plan' | 'backtest' | 'scanner'>('chart');
   const [data, setData] = useState<ChartData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -53,7 +54,7 @@ export default function App() {
         <header className="toolbar">
           <h1>{symbol}</h1>
           <nav className="tabs" aria-label="Screens">
-            {(['chart', 'plan', 'backtest'] as const).map(s => <button key={s} aria-pressed={screen === s} onClick={() => setScreen(s)}>{{ chart: 'Chart & Signals', plan: 'Entry, Exit & Price Projections', backtest: 'Replay & Backtest' }[s]}</button>)}
+            {(['chart', 'plan', 'backtest', 'scanner'] as const).map(s => <button key={s} aria-pressed={screen === s} onClick={() => setScreen(s)}>{{ chart: 'Chart & Signals', plan: 'Entry, Exit & Price Projections', backtest: 'Replay & Backtest', scanner: 'Next Day Watchlist' }[s]}</button>)}
           </nav>
           <label>Timeframe <select value={timeframe} onChange={e => { setTimeframe(e.target.value); setReplayAt(null); }}>{TIMEFRAMES.map(t => <option key={t}>{t}</option>)}</select></label>
           <label>Sessions <select value={sessions} onChange={e => setSessions(e.target.value as 'regular' | 'extended')}><option value="regular">Regular only</option><option value="extended">Include extended hours</option></select></label>
@@ -65,7 +66,7 @@ export default function App() {
         {data?.error && <p className="banner error" role="alert">Data request failed: {data.error}{data.candles.length ? ' Showing cached candles from the last successful fetch.' : ''}</p>}
         {data && <Provenance data={data} zone={zone} hashOk={hashOk} />}
         {data && data.candles.length === 0 && <p className="banner warn">No candles returned for {symbol} on the {data.feed.toUpperCase()} feed in this range. Nothing has been substituted.</p>}
-        {data && data.candles.length > 0 && screen !== 'backtest' && (
+        {data && data.candles.length > 0 && screen !== 'backtest' && screen !== 'scanner' && (
           <>
             <fieldset className="toggles"><legend>Indicators</legend>
               {(Object.keys(toggles) as (keyof Toggles)[]).map(k => <label key={k}><input type="checkbox" checked={toggles[k]} onChange={e => setToggles({ ...toggles, [k]: e.target.checked })} /> {{ ema: `EMA ${data.config.ema_fast}/${data.config.ema_slow}`, vwap: 'Session VWAP', swings: 'Confirmed swings', signals: 'Signals', rsi: `RSI ${data.config.rsi_period}`, macd: 'MACD' }[k]}</label>)}
@@ -80,6 +81,7 @@ export default function App() {
           </div>
         )}
         {data && screen === 'plan' && <PlanScreen data={data} zone={zone} toggles={toggles} />}
+        {screen === 'scanner' && <ScannerScreen zone={zone} />}
         {screen === 'backtest' && (
           <BacktestScreen symbol={symbol} timeframe={timeframe} sessions={sessions} zone={zone} replayAt={replayAt} replayOptions={replayOptions} onReplay={setReplayAt} data={data} toggles={toggles} />
         )}

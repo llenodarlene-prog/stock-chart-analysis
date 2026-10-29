@@ -63,3 +63,6 @@ th, td { text-align: left; padding: 6px; border-bottom: 1px solid #f1f3f4; verti
 .src.calculated { background: #f1f3f4; color: #3c4043; }
 .footnote { font-size: 12px; color: #5f6368; margin-top: 16px; }
 @media (max-width: 800px) { .app { grid-template-columns: 1fr; } .sidebar { border-right: 0; border-bottom: 1px solid #dadce0; } .grid, .grid2 { grid-template-columns: 1fr; } }
+.minichart { height: 300px; border: 1px solid #dadce0; border-radius: 6px; }
+.candidate { background: #fff; }
+.candidate h3 { text-transform: none; }
