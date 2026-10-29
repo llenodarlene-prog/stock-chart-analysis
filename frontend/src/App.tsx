@@ -5,6 +5,7 @@ import { candleHash } from './hash';
 import PlanScreen from './PlanScreen';
 import BacktestScreen from './BacktestScreen';
 import ScannerScreen from './ScannerScreen';
+import { AlertsBell, MonitorPanel } from './Alerts';
 import { AssessmentPanel, NextStepsPanel, Provenance, SignalPanel } from './Panels';
 
 const REFRESH_MS = 30_000;
@@ -14,6 +15,7 @@ export default function App() {
   const [timeframe, setTimeframe] = useState('5Min');
   const [sessions, setSessions] = useState<'regular' | 'extended'>('regular');
   const [zone, setZone] = useState<ZoneKey>('ny');
+  const [adjustment, setAdjustment] = useState<'raw' | 'split' | 'all'>('raw');
   const [screen, setScreen] = useState<'chart' | 'plan' | 'backtest' | 'scanner'>('chart');
   const [data, setData] = useState<ChartData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -32,7 +34,7 @@ export default function App() {
     if (!symbol) return;
     setLoading(true);
     try {
-      const params = new URLSearchParams({ symbol, timeframe, sessions });
+      const params = new URLSearchParams({ symbol, timeframe, sessions, adjustment });
       const path = replayAt ? `/api/replay?${params}&until=${replayAt}` : `/api/candles?${params}`;
       const next = await api<ChartData>(path);
       setData(next);
@@ -43,7 +45,7 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, [symbol, timeframe, sessions, replayAt]);
+  }, [symbol, timeframe, sessions, adjustment, replayAt]);
 
   useEffect(() => { load(); }, [load]);
   // Polling doubles as reconnect: each request re-fetches the recent overlap window.
@@ -53,7 +55,7 @@ export default function App() {
 
   return (
     <div className="app">
-      <Sidebar symbol={symbol} onPick={s => { setSymbol(s); setReplayAt(null); }} />
+      <Sidebar symbol={symbol} zone={zone} onPick={s => { setSymbol(s); setReplayAt(null); }} />
       <main>
         <header className="toolbar">
           <h1>{symbol || 'No symbol selected'}</h1>
@@ -63,7 +65,9 @@ export default function App() {
           <label>Timeframe <select value={timeframe} onChange={e => { setTimeframe(e.target.value); setReplayAt(null); }}>{TIMEFRAMES.map(t => <option key={t}>{t}</option>)}</select></label>
           <label>Sessions <select value={sessions} onChange={e => setSessions(e.target.value as 'regular' | 'extended')}><option value="regular">Regular only</option><option value="extended">Include extended hours</option></select></label>
           <label>Time zone <select value={zone} onChange={e => setZone(e.target.value as ZoneKey)}><option value="ny">New York</option><option value="manila">Manila</option></select></label>
+          <label>Prices <select value={adjustment} onChange={e => setAdjustment(e.target.value as 'raw' | 'split' | 'all')}><option value="raw">As traded (raw)</option><option value="split">Adjusted for splits</option><option value="all">Adjusted for splits and dividends</option></select></label>
           <button onClick={load} disabled={loading}>{loading ? 'Loading…' : 'Refresh'}</button>
+          <AlertsBell zone={zone} onPick={s => { setSymbol(s); setScreen('chart'); setReplayAt(null); }} />
         </header>
         {health && !health.credentials_configured && <p className="banner error">Alpaca credentials are not configured on the backend. Add ALPACA_API_KEY and ALPACA_API_SECRET to backend/.env and restart. No data will be shown until then.</p>}
         {error && <p className="banner error" role="alert">{error}</p>}
@@ -92,7 +96,7 @@ export default function App() {
         {data && screen === 'plan' && <PlanScreen data={data} zone={zone} toggles={toggles} />}
         {screen === 'scanner' && <ScannerScreen zone={zone} />}
         {screen === 'backtest' && (
-          <BacktestScreen symbol={symbol} timeframe={timeframe} sessions={sessions} zone={zone} replayAt={replayAt} replayOptions={replayOptions} onReplay={setReplayAt} data={data} toggles={toggles} />
+          <BacktestScreen symbol={symbol} timeframe={timeframe} sessions={sessions} adjustment={adjustment} zone={zone} replayAt={replayAt} replayOptions={replayOptions} onReplay={setReplayAt} data={data} toggles={toggles} />
         )}
         {data && <p className="footnote">ATR {fmtPrice(data.assessment.levels.atr)} · Analysis and alerts only. This app does not place orders. Gaps and slippage can cause losses beyond a planned stop.</p>}
       </main>
@@ -100,7 +104,7 @@ export default function App() {
   );
 }
 
-function Sidebar({ symbol, onPick }: { symbol: string; onPick: (s: string) => void }) {
+function Sidebar({ symbol, zone, onPick }: { symbol: string; zone: ZoneKey; onPick: (s: string) => void }) {
   const [watch, setWatch] = useState<string[]>([]);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<{ symbol: string; name: string; exchange: string }[]>([]);
@@ -131,6 +135,7 @@ function Sidebar({ symbol, onPick }: { symbol: string; onPick: (s: string) => vo
       <button className="small-btn" onClick={() => toggle(symbol)}>{watch.includes(symbol) ? `Remove ${symbol}` : `Add ${symbol}`}</button>
       <ul className="watch">{watch.map(s => <li key={s}><button aria-current={s === symbol} onClick={() => onPick(s)}>{s}</button></li>)}</ul>
       <p className="small">Watchlist entries are symbols only. No positions are stored or assumed.</p>
+      <MonitorPanel zone={zone} />
       <p className="small muted">Times: {fmtTime(Math.floor(Date.now() / 1000), 'ny')}</p>
     </aside>
   );

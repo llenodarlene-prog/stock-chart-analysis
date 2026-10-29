@@ -9,7 +9,9 @@ export function Provenance({ data, zone, hashOk }: { data: ChartData; zone: Zone
     <section className="provenance" aria-label="Data source">
       <span><b>Feed:</b> {data.feed_label}</span>
       <span><b>Sessions:</b> {data.sessions === 'regular' ? 'Regular 09:30-16:00 ET' : 'Extended 04:00-20:00 ET (pre, regular, after-hours separated)'}</span>
-      <span><b>Prices:</b> {data.adjustment} (unadjusted)</span>
+      <span><b>Prices:</b> {data.adjustment === 'raw' ? 'as traded (unadjusted)' : data.adjustment === 'split' ? 'adjusted for splits' : 'adjusted for splits and dividends'}</span>
+      {data.provenance.source && <span><b>Built from:</b> {data.provenance.source}</span>}
+      {data.provenance.calendar && <span className="small">{data.provenance.calendar}</span>}
       <span><b>Market now:</b> {p.market_state}</span>
       {p.replay_until && <span className="tag warn">Replay as of {fmtTime(p.replay_until, zone)}</span>}
       <span><b>Last completed candle:</b> {fmtTime(p.last_completed_time, zone)}</span>
@@ -135,7 +137,7 @@ export function NextStepsPanel({ data, zone }: { data: ChartData; zone: ZoneKey 
               {sc.exits.length > 0 && <><p><b>Exit plan:</b></p><ul>{sc.exits.map(x => <li key={x}>{x}</li>)}</ul></>}
             </div>
           ))}</div>
-          <p className="small">The percentages are counts of what happened on this stock and timeframe in the loaded history, tested with next-candle fills and slippage. They are not odds for the future.</p>
+          <p className="small">The percentages count what happened on this stock and timeframe over about the last {n.history_window_days ?? 'loaded'} days (and, when shown, across your watchlist), tested with next-candle fills and slippage. They are not odds for the future.</p>
         </>
       )}
       <p className="small">{n.reminder}</p>

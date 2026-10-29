@@ -102,25 +102,31 @@ def refresh_universe(store: Store, transport: httpx.BaseTransport | None = None)
 
 # Data -----------------------------------------------------------------------------
 
-def ensure_30m(client: AlpacaClient, store: Store, symbols: list[str], cfg: ScanConfig, now: int, batch: int = 100) -> list[str]:
-    """Fetches missing and recent 30-minute bars. Returns error messages."""
+def ensure_30m(client: AlpacaClient, store: Store, symbols: list[str], cfg: ScanConfig, now: int, batch: int = 100, adjustment: str = "raw", stale_after: int = 600, progress=None) -> list[str]:
+    """Fetches missing and recent 30-minute bars. Returns error messages.
+    Adjusted bars are cached separately from raw bars."""
+    key = client.settings.feed if adjustment == "raw" else f"{client.settings.feed}+{adjustment}"
     start = now - cfg.lookback_days * 86400
-    coverage = store.coverage_30m(client.settings.feed)
+    coverage = store.coverage_30m(key)
     errors: list[str] = []
     fresh = [s for s in symbols if s not in coverage or coverage[s]["start"] > start]
-    stale = [s for s in symbols if s in coverage and coverage[s]["start"] <= start and now - coverage[s]["fetched_at"] > 600]
+    stale = [s for s in symbols if s in coverage and coverage[s]["start"] <= start and now - coverage[s]["fetched_at"] > stale_after]
+    total, done = len(fresh) + len(stale), 0
     for group, begin in ((fresh, start), (stale, None)):
         for i in range(0, len(group), batch):
             chunk = group[i:i + batch]
             frm = begin if begin is not None else min(coverage[s]["end"] for s in chunk) - 2 * 86400
             try:
-                data = client.bars_multi(chunk, "30Min", frm, now)
+                data = client.bars_multi(chunk, "30Min", frm, now, adjustment)
             except AlpacaError as exc:
                 errors.append(f"{chunk[0]}…{chunk[-1]}: {exc}")
-                continue
-            for symbol, bars in data.items():
-                store.upsert_bars_30m(symbol, client.settings.feed, bars)
-            store.set_coverage_30m(chunk, client.settings.feed, frm, now)
+            else:
+                for symbol, bars in data.items():
+                    store.upsert_bars_30m(symbol, key, bars)
+                store.set_coverage_30m(chunk, key, frm, now)
+            done += len(chunk)
+            if progress:
+                progress("Downloading price history", done, total)
     return errors
 
 
@@ -257,26 +263,30 @@ def select(candidates: list[dict], cfg: ScanConfig) -> list[dict]:
     return chosen
 
 
-def run_scan(client: AlpacaClient, store: Store, acfg: AnalysisConfig, cfg: ScanConfig, now: int, symbols: list[str] | None = None) -> dict:
+def run_scan(client: AlpacaClient, store: Store, acfg: AnalysisConfig, cfg: ScanConfig, now: int, symbols: list[str] | None = None, progress=None) -> dict:
     universe = store.universe()
     if not universe:
         raise AlpacaError("The GoTrade universe has not been loaded. Refresh it first.")
     names = {u["symbol"]: u["name"] for u in universe}
     chosen = [s for s in (symbols or list(names)) if s in names]
-    errors = ensure_30m(client, store, chosen, cfg, now)
+    errors = ensure_30m(client, store, chosen, cfg, now, progress=progress)
     start = now - cfg.lookback_days * 86400
     found: list[dict] = []
     rejected = {"insufficient_history": 0, "price_below_min": 0, "no_setup": 0, "stale": 0}
     last_session = None
     per_symbol = {}
-    for symbol in chosen:
+    for n, symbol in enumerate(chosen, 1):
+        if progress and n % 100 == 0:
+            progress("Building daily candles", n, len(chosen))
         done = [c for c in daily_candles(store.bars_30m(symbol, client.settings.feed, start), now) if c.complete]
         if len(done) < cfg.min_history_days:
             rejected["insufficient_history"] += 1
             continue
         last_session = max(last_session or "", done[-1].session_date)
         per_symbol[symbol] = done
-    for symbol, done in per_symbol.items():
+    for n, (symbol, done) in enumerate(per_symbol.items(), 1):
+        if progress and n % 50 == 0:
+            progress("Checking setups", n, len(per_symbol))
         if done[-1].session_date != last_session:
             rejected["stale"] += 1
             continue
@@ -292,6 +302,8 @@ def run_scan(client: AlpacaClient, store: Store, acfg: AnalysisConfig, cfg: Scan
             found.append({**s, "symbol": symbol, "name": names.get(symbol, ""), "plans": plans_for(s, cfg, acfg, done, sw), "history_days": len(done)})
     # Liquidity and news only for symbols that have a setup.
     syms = sorted({c["symbol"] for c in found})
+    if progress:
+        progress("Checking liquidity and news", 0, len(syms))
     snaps, articles = {}, []
     for i in range(0, len(syms), 100):
         try:

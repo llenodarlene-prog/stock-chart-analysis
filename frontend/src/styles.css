@@ -78,3 +78,16 @@ th, td { text-align: left; padding: 6px; border-bottom: 1px solid #f1f3f4; verti
 .simple-sc .entry { border-top: 1px dashed #dadce0; padding-top: 4px; }
 .simple-sc .history { background: #f1f3f4; padding: 4px 8px; border-radius: 4px; }
 .simple-sc.neutral h4 { color: #5f6368; }
+.alerts { position: relative; }
+.alerts-panel { position: absolute; right: 0; top: 40px; z-index: 20; width: min(420px, 90vw); max-height: 70vh; overflow: auto; background: #fff; border: 1px solid #dadce0; border-radius: 8px; padding: 12px; box-shadow: 0 8px 24px rgba(0,0,0,.12); }
+.alerts-panel ul { list-style: none; padding: 0; margin: 8px 0; }
+.alerts-panel li { border-top: 1px solid #f1f3f4; padding: 8px 0; }
+.alerts-panel li.read { opacity: .6; }
+.linkish { border: 0; padding: 0; background: none; color: #1a73e8; text-align: left; }
+.monitor { margin-top: 16px; border-top: 1px solid #dadce0; padding-top: 8px; }
+.monitor h2 { font-size: 15px; }
+.monitor label { display: flex; gap: 6px; align-items: center; margin: 4px 0; }
+.monitor input[type=checkbox] { width: auto; }
+.monitor select { width: auto; }
+.progress { height: 10px; background: #e8eaed; border-radius: 999px; overflow: hidden; margin: 8px 0; }
+.progress > div { height: 100%; background: #1a73e8; transition: width .3s; }

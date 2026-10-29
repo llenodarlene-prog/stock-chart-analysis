@@ -182,6 +182,22 @@ def explain(signal: dict) -> str:
     return signal.get("rule", "")
 
 
+def plain_reason(reason: str) -> str:
+    """Turns a data-quality reason into plain words with what to do about it."""
+    r = reason.lower()
+    if "missing recent candles" in r:
+        return "This stock trades rarely on the free IEX feed, so many recent candles are empty. Try the 15-minute or daily chart, where gaps matter less."
+    if "insufficient history" in r or "indicators need" in r:
+        return "There isn't enough price history on this timeframe yet. Switch to a shorter timeframe or wait for more candles."
+    if "stale" in r:
+        return "The data hasn't updated recently while the market is open. Click Refresh; if it persists, check your internet connection or Alpaca status."
+    if "request failed" in r or "http" in r:
+        return f"Alpaca didn't return data: {reason.split(':', 1)[-1].strip()}"
+    if "no candles" in r:
+        return "No trades were found for this stock in this period on the free IEX feed. Try the daily chart or another symbol."
+    return reason
+
+
 def next_steps(label: str, trend: str, levels: dict, recent: list[dict], evidence: list[dict], gates: dict, timeframe: str) -> dict:
     """Plain-language steps built only from the levels and rules above.
     Every price here is an algorithm-derived level shown elsewhere in the
@@ -202,7 +218,7 @@ def next_steps(label: str, trend: str, levels: dict, recent: list[dict], evidenc
     if not gates["actionable"]:
         return {
             "status": "wait", "headline": "Don't act on this chart right now: the data isn't reliable enough yet.",
-            "steps": ["Reasons: " + " ".join(gates["blocked_reasons"]), "Refresh in a few minutes, or switch to a longer timeframe (for example daily) for more history."],
+            "steps": [plain_reason(r) for r in gates["blocked_reasons"]] + ["The chart and levels below are still shown for reference, but no buy or sell signal is confirmed until this clears."],
             "levels": levels_out, "reminder": "You make the final decision. This app never places trades.",
         }
     if label == "bullish":
@@ -261,15 +277,25 @@ def history_stats(completed: list[Candle], ind: dict, signals: list[dict], cfg: 
         target = sum(1 for t in trades if t["exit_reason"] == "target")
         stopped = sum(1 for t in trades if t["exit_reason"] in ("stop", "gap through stop"))
         out[key] = {
-            "cases": n, "enough": n >= MIN_HISTORY_CASES,
+            "cases": n, "enough": n >= MIN_HISTORY_CASES, "target": target, "stopped": stopped, "sum_r": sum(t["r_multiple"] for t in trades),
             "reached_target_pct": target / n * 100 if n else None,
             "stopped_pct": stopped / n * 100 if n else None,
             "avg_r": sum(t["r_multiple"] for t in trades) / n if n else None,
+            "from": completed[0].time if completed else None, "to": completed[-1].time if completed else None,
         }
     return out
 
 
 def _history_line(h: dict, what: str) -> str:
+    own = _own_line(h, what)
+    pool = h.get("pooled")
+    if pool and pool["cases"] >= MIN_HISTORY_CASES:
+        own += (f" Across your {pool['symbols']} watchlist stocks on this timeframe: {pool['cases']} cases, {pool['reached_target_pct']:.0f}% reached 2R first, "
+                f"{pool['stopped_pct']:.0f}% hit the stop first, average {pool['avg_r']:+.2f}R.")
+    return own
+
+
+def _own_line(h: dict, what: str) -> str:
     if not h["cases"]:
         return f"Past results on this chart: no past {what} to measure."
     if not h["enough"]:
@@ -278,7 +304,13 @@ def _history_line(h: dict, what: str) -> str:
             f"{h['stopped_pct']:.0f}% hit the stop first, average result {h['avg_r']:+.2f}R. This is history on this stock and timeframe, not a prediction.")
 
 
-def simple_scenarios(levels: dict, history: dict, timeframe: str) -> list[dict]:
+def simple_scenarios(levels: dict, history: dict, timeframe: str, pooled: dict | None = None) -> list[dict]:
+    if pooled:
+        # Add a combined line when the watchlist gives a larger sample.
+        for key, h in history.items():
+            pool = pooled.get(key)
+            if pool and pool["symbols"] > 1 and pool["cases"] > h["cases"]:
+                h["pooled"] = pool
     tf = {"1Min": "1-minute", "5Min": "5-minute", "15Min": "15-minute", "1Hour": "hourly", "1Day": "daily"}.get(timeframe, timeframe)
     p = lambda x: f"${x:,.2f}" if x is not None else "n/a"
     r, s, buf = levels["resistance"], levels["support"], levels["buffer"] or 0.0
@@ -319,4 +351,16 @@ def simple_scenarios(levels: dict, history: dict, timeframe: str) -> list[dict]:
             "entries": [{"label": "Don't buy", "text": "A breakdown means the chart no longer supports buying.", "history": _history_line(history["breakdown"], "breakdowns (measured as falls to 2R below)")}],
             "exits": [f"If you own it: this is the exit signal from the app's rules."] + ([("Next support areas below: " + ", then ".join(p(t) for t in downs) + ".")] if downs else []),
         })
+    return out
+
+
+def pool_stats(per_symbol: list[dict]) -> dict:
+    """Combines per-symbol history counts (same timeframe and rules)."""
+    out = {}
+    for key in ("early", "confirmed", "retest", "breakdown"):
+        rows = [x[key] for x in per_symbol if x.get(key)]
+        n = sum(r["cases"] for r in rows)
+        if not n:
+            continue
+        out[key] = {"symbols": len(rows), "cases": n, "reached_target_pct": sum(r["target"] for r in rows) / n * 100, "stopped_pct": sum(r["stopped"] for r in rows) / n * 100, "avg_r": sum(r["sum_r"] for r in rows) / n}
     return out

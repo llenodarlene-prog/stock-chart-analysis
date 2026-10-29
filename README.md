@@ -57,7 +57,7 @@ cd frontend && npm test && npm run build
 - **Forming candles.** A candle is complete 60 seconds after its bucket ends. Daily candles are complete after the last included session closes. Forming candles are drawn in grey and never produce signals.
 - **Pagination and rate limits.** The client follows `next_page_token` until the data ends. On HTTP 429 it waits until `X-RateLimit-Reset`. It retries 5xx and network errors with backoff, then reports the failure.
 - **Reconnects and late corrections.** The frontend polls every 30 seconds. Each refresh re-fetches the last hour, so a bar Alpaca revises replaces the cached copy. The revision is logged and shown.
-- **Missing bars.** When there are no trades on the feed in a bucket, there is no candle. Empty buckets are counted and shown rather than filled in. Exchange holidays and early closes are not modeled; they appear as missing candles.
+- **Missing bars.** When there are no trades on the feed in a bucket, there is no candle. Empty buckets are counted and shown rather than filled in. Holidays and early closes come from Alpaca's market calendar.
 - **Corporate actions.** Corporate actions come from `/v1/corporate-actions`. Splits, dividends, spin-offs and mergers inside the loaded range are flagged. The chart is marked "CA" at the action date, and any signal whose lookback crosses the date carries a comparability caveat.
 
 ## Analysis Rules
@@ -156,6 +156,35 @@ The blocking reasons are listed in the app.
 - Signals first seen on a live recent candle are stored with that timestamp. They form a forward paper-test log.
 - Do not tune the rules to reproduce one stock's past move. Check any change on other symbols, on the out-of-sample split, and in forward paper testing first.
 
+## Alerts and Background Checks
+
+- **What gets checked.** While the backend is running, every watchlist symbol is checked once a minute on the timeframe you choose under "Background checks" in the sidebar.
+- **What creates an alert.** An alert is created once for each newly confirmed event:
+  - a confirmed breakout or early breakout;
+  - a retest that held;
+  - a failed breakout;
+  - a close beyond the latest confirmed swing level;
+  - a completed close beyond a saved plan's stop or target.
+- **Notifications.** Select "Turn on Mac notifications" in the Alerts menu to get a notification and a short sound. Alerts only fire while the app is running.
+- **Information-only alerts.** An alert raised while data checks fail is labeled "information only".
+
+## Prices, History and the Market Calendar
+
+- **Price adjustment.** "Prices" switches between as-traded (raw) prices and prices adjusted for splits, or for splits and dividends. Adjusted bars are cached separately.
+- **Daily candles.** Daily candles are built from 30-minute bars, which downloads far less data than 1-minute bars.
+- **Past-results history window.** "Past results" in each scenario uses a longer window:
+
+  | Timeframe | History used |
+  |---|---|
+  | 1-minute | 20 days |
+  | 5-minute | 60 days |
+  | 15-minute | 120 days |
+  | Hourly | 250 days |
+  | Daily | 730 days |
+
+  When your watchlist has results on the same timeframe, a combined line is added. Fewer than 20 cases is reported as too few.
+- **Market calendar.** Session times come from Alpaca's market calendar, so holidays and early closes are handled correctly. If the calendar can't load, the app says so and falls back to weekday hours.
+
 ## Next Trading Day Watchlist
 
 - **Universe.** The scan universe is the official [GoTrade US stock directory](https://www.heygotrade.com/en/us-stock/). Select "Refresh GoTrade directory" to load it. The app stores the page's HTTP `Last-Modified` date and the fetch time. A page that fails or parses to fewer than 100 symbols leaves the previous universe in place.
@@ -195,7 +224,6 @@ No ticker is built into the app. The chart opens on the first symbol in your wat
 
 ## Known Limitations
 
-- Exchange holidays and early closes are not modeled.
 - Updates come from REST polling every 30 seconds, not a streaming connection.
 - IEX volume is a small share of the market, so relative volume and VWAP are IEX-only measures.
 - Symbol search uses Alpaca's asset list. That list is for lookup only; it does not confirm that you can trade a symbol with any broker.

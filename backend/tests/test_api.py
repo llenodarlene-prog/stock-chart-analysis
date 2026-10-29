@@ -31,7 +31,11 @@ def fixture_bars():
 def handler(request):
     if request.url.path == "/v1/corporate-actions":
         return httpx.Response(200, json={"corporate_actions": {}, "next_page_token": None})
+    if request.url.path == "/v2/calendar":
+        return httpx.Response(200, json=[])
     bars = fixture_bars()
+    if request.url.params.get("timeframe") == "30Min":
+        bars = [b for b in bars if b["t"][14:16] in ("00", "30")]
     start, end = request.url.params["start"], request.url.params["end"]
     chosen = [b for b in bars if start <= b["t"] <= end]
     return httpx.Response(200, json={"bars": {"AIOK": chosen}, "next_page_token": None})
@@ -96,3 +100,27 @@ def test_scenarios_report_measured_history_not_invented_odds(monkeypatch):
     lines = [e["history"] for s in scenarios for e in s["entries"] if e["history"]]
     assert lines and all(l.startswith("Past results on this chart") for l in lines)
     assert all(("Too few" in l) or ("no past" in l) or ("not a prediction" in l) for l in lines)
+
+
+def test_alerts_are_created_once_and_plan_stop_alerts(monkeypatch):
+    main.store = Store(":memory:")
+    data = {"symbol": "AIOK", "timeframe": "5Min", "gates": {"actionable": True},
+            "signals": [{"kind": "breakout", "variant": "confirmed", "direction": "bullish", "time": 100, "level": 14.0, "actionable": True, "blocked_reasons": [], "explanation": "Confirmed."},
+                        {"kind": "breakout", "variant": "confirmed", "direction": "bullish", "time": 50, "level": 13.0, "actionable": False, "blocked_reasons": ["Historical signal (replay only)."], "explanation": "Old."}],
+            "assessment": {"as_of": 100, "evidence": [], "levels": {"close": 12.0}}}
+    main.store.save_plan({"symbol": "AIOK", "side": "long", "entry": 14, "stop": 12.5, "targets": [{"price": 16}]})
+    assert main.alerts_from(data) == 2  # the recent breakout and the plan stop; the old signal is ignored
+    assert main.alerts_from(data) == 0  # no duplicates on the next check
+    titles = [a["title"] for a in main.store.alerts()]
+    assert any("Breakout confirmed" in t for t in titles) and any("stop level was reached" in t for t in titles)
+
+
+def test_adjusted_bars_are_cached_separately():
+    assert main.cache_key("raw") == "iex" and main.cache_key("split") == "iex+split"
+
+
+def test_daily_chart_uses_30_minute_bars(monkeypatch):
+    monkeypatch.setattr(main.time, "time", lambda: ny(2026, 10, 27, 12, 0))
+    main.store = Store(":memory:")
+    data = TestClient(main.app).get("/api/candles", params={"symbol": "AIOK", "timeframe": "1Day"}).json()
+    assert data["provenance"]["source"].startswith("30-minute")

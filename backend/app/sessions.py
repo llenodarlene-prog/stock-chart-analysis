@@ -44,11 +44,45 @@ class Candle:
         return self.__dict__.copy()
 
 
+# Trading days from Alpaca's market calendar: date -> list of (session, start, end).
+# Days inside CALENDAR_RANGE but missing from CALENDAR are market holidays.
+# Without a calendar, weekday clock times are used.
+CALENDAR: dict[str, list[tuple[str, dtime, dtime]]] = {}
+CALENDAR_RANGE: tuple[str, str] | None = None
+
+
+def _t(text: str) -> dtime:
+    text = text.replace(":", "")
+    return dtime(int(text[:2]), int(text[2:4]))
+
+
+def load_calendar(days: list[dict]) -> None:
+    """Installs calendar rows (date, open, close, session_open, session_close)."""
+    global CALENDAR_RANGE
+    CALENDAR.clear()
+    for d in days:
+        try:
+            pre, op, cl, post = _t(d.get("session_open") or "0400"), _t(d["open"]), _t(d["close"]), _t(d.get("session_close") or "2000")
+        except (KeyError, ValueError, TypeError):
+            continue
+        CALENDAR[d["date"]] = [("pre", pre, op), ("regular", op, cl), ("post", cl, post)]
+    CALENDAR_RANGE = (min(CALENDAR), max(CALENDAR)) if CALENDAR else None
+
+
+def day_sessions(day) -> list[tuple[str, dtime, dtime]]:
+    key = day.isoformat()
+    if key in CALENDAR:
+        return CALENDAR[key]
+    if CALENDAR_RANGE and CALENDAR_RANGE[0] <= key <= CALENDAR_RANGE[1]:
+        return []  # market holiday
+    return [] if day.weekday() >= 5 else list(SESSIONS)
+
+
 def session_of(ts: int) -> tuple[str, datetime, datetime] | None:
     local = datetime.fromtimestamp(ts, NY)
-    for name, start, end in SESSIONS:
+    day = local.date()
+    for name, start, end in day_sessions(day):
         if start <= local.time() < end:
-            day = local.date()
             return name, datetime.combine(day, start, NY), datetime.combine(day, end, NY)
     return None
 
@@ -68,8 +102,9 @@ def aggregate(bars: list[Bar], timeframe: str, include: set[str], now: int) -> l
         if size is None:
             # Daily candles: one per New York date across the included sessions.
             day = start.date()
-            first = min(datetime.combine(day, s, NY) for n, s, _ in SESSIONS if n in include)
-            last = max(datetime.combine(day, e, NY) for n, _, e in SESSIONS if n in include)
+            todays = [x for x in day_sessions(day) if x[0] in include]
+            first = min(datetime.combine(day, s, NY) for _, s, _ in todays)
+            last = max(datetime.combine(day, e, NY) for _, _, e in todays)
             key = (day.isoformat(),)
             meta[key] = (int(first.timestamp()), int(last.timestamp()), "regular" if include == {"regular"} else "extended", day.isoformat(), 0)
         else:
@@ -95,24 +130,34 @@ def data_hash(candles: list[Candle]) -> str:
 
 
 def market_state(now: int) -> str:
-    """Which session is in progress now (weekday clock only; exchange
-    holidays and early closes are not modeled and are reported as gaps)."""
-    local = datetime.fromtimestamp(now, NY)
-    if local.weekday() >= 5:
-        return "closed"
+    """Which session is in progress now, using the market calendar when loaded."""
     found = session_of(now)
     return found[0] if found else "closed"
 
 
+def trading_dates(candles: list[Candle]) -> list[str]:
+    """Trading dates spanned by the candles: from the calendar when it covers
+    them (so a day with no trades still counts), else the dates present."""
+    present = sorted({c.session_date for c in candles})
+    if not present:
+        return []
+    if CALENDAR_RANGE and CALENDAR_RANGE[0] <= present[0] and present[-1] <= CALENDAR_RANGE[1]:
+        return sorted(d for d in CALENDAR if present[0] <= d <= present[-1])
+    return present
+
+
 def expected_buckets(candles: list[Candle], timeframe: str, include: set[str]) -> int:
-    """Buckets that would exist on the trading dates present in the data."""
+    """Buckets that should exist on the trading dates spanned by the data,
+    including early closes."""
+    from datetime import date
+
     size = TIMEFRAMES[timeframe]
-    dates = sorted({c.session_date for c in candles})
+    dates = trading_dates(candles)
     if size is None:
         return len(dates)
     total = 0
-    for _ in dates:
-        for name, start, end in SESSIONS:
+    for d in dates:
+        for name, start, end in day_sessions(date.fromisoformat(d)):
             if name in include:
                 minutes = (end.hour * 60 + end.minute) - (start.hour * 60 + start.minute)
                 total += -(-minutes // size)

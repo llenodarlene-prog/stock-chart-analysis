@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import json
+import functools
 import sqlite3
+import threading
 import time
 from pathlib import Path
 
@@ -41,6 +43,11 @@ CREATE TABLE IF NOT EXISTS availability (
   symbol TEXT PRIMARY KEY, available INTEGER, confirmed_at REAL, note TEXT);
 CREATE TABLE IF NOT EXISTS scans (
   id INTEGER PRIMARY KEY AUTOINCREMENT, created_at REAL, data TEXT);
+CREATE TABLE IF NOT EXISTS alerts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, created_at REAL, symbol TEXT, timeframe TEXT,
+  kind TEXT, bar_time INTEGER, level TEXT, actionable INTEGER, title TEXT, message TEXT, read INTEGER DEFAULT 0,
+  UNIQUE (symbol, timeframe, kind, bar_time));
+CREATE TABLE IF NOT EXISTS calendar (date TEXT PRIMARY KEY, open TEXT, close TEXT, session_open TEXT, session_close TEXT);
 CREATE TABLE IF NOT EXISTS plans (
   id INTEGER PRIMARY KEY AUTOINCREMENT, created_at REAL, updated_at REAL, data TEXT);
 """
@@ -53,6 +60,8 @@ class Store:
         self.db = sqlite3.connect(str(path), check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.db.executescript(SCHEMA)
+        # One connection is shared by request threads and the background monitor.
+        self.lock = threading.RLock()
 
     # Bars -----------------------------------------------------------------
     def upsert_bars(self, symbol: str, feed: str, bars: list[Bar]) -> int:
@@ -163,6 +172,26 @@ class Store:
         row = self.db.execute("SELECT * FROM scans WHERE id=?", (scan_id,)).fetchone() if scan_id else self.db.execute("SELECT * FROM scans ORDER BY id DESC LIMIT 1").fetchone()
         return {"id": row["id"], "created_at": row["created_at"], **json.loads(row["data"])} if row else None
 
+    # Alerts and calendar -------------------------------------------------------
+    def add_alert(self, symbol: str, timeframe: str, kind: str, bar_time: int, level, actionable: bool, title: str, message: str) -> bool:
+        cur = self.db.execute("INSERT OR IGNORE INTO alerts (created_at,symbol,timeframe,kind,bar_time,level,actionable,title,message) VALUES (?,?,?,?,?,?,?,?,?)", (time.time(), symbol, timeframe, kind, bar_time, json.dumps(level), int(actionable), title, message))
+        self.db.commit()
+        return cur.rowcount > 0
+
+    def alerts(self, since_id: int = 0, limit: int = 100) -> list[dict]:
+        return [dict(r) for r in self.db.execute("SELECT * FROM alerts WHERE id>? ORDER BY id DESC LIMIT ?", (since_id, limit))]
+
+    def mark_alerts_read(self) -> None:
+        self.db.execute("UPDATE alerts SET read=1")
+        self.db.commit()
+
+    def save_calendar(self, days: list[dict]) -> None:
+        self.db.executemany("INSERT OR REPLACE INTO calendar VALUES (?,?,?,?,?)", [(d["date"], d.get("open"), d.get("close"), d.get("session_open"), d.get("session_close")) for d in days])
+        self.db.commit()
+
+    def calendar(self) -> dict[str, dict]:
+        return {r["date"]: dict(r) for r in self.db.execute("SELECT * FROM calendar")}
+
     # Watchlist and plans ----------------------------------------------------
     def watchlist(self) -> list[str]:
         return [r["symbol"] for r in self.db.execute("SELECT symbol FROM watchlist ORDER BY added_at")]
@@ -190,3 +219,16 @@ class Store:
     def delete_plan(self, plan_id: int) -> None:
         self.db.execute("DELETE FROM plans WHERE id=?", (plan_id,))
         self.db.commit()
+
+
+def _locked(method):
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self.lock:
+            return method(self, *args, **kwargs)
+    return wrapper
+
+
+for _name, _fn in list(vars(Store).items()):
+    if callable(_fn) and not _name.startswith("_"):
+        setattr(Store, _name, _locked(_fn))

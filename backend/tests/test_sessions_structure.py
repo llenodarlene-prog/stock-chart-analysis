@@ -74,3 +74,17 @@ def test_forming_candle_never_produces_a_signal():
     assert not candles[-1].complete
     signals = detect_signals(candles, compute_all(candles, cfg, False), cfg)
     assert all(s["index"] < len(candles) - 1 for s in signals)
+
+
+def test_calendar_early_close_and_holiday():
+    from app import sessions
+    sessions.load_calendar([{"date": "2026-11-27", "open": "09:30", "close": "13:00", "session_open": "0400", "session_close": "1700"}, {"date": "2026-11-25", "open": "09:30", "close": "16:00", "session_open": "0400", "session_close": "2000"}])
+    try:
+        assert sessions.market_state(ny(2026, 11, 26, 11, 0)) == "closed"  # Thanksgiving, inside the calendar range
+        assert sessions.session_of(ny(2026, 11, 27, 13, 30))[0] == "post"  # after the early close
+        bars = minute_bars(ny(2026, 11, 27, 12, 30), [10.0] * 30)  # 12:30-12:59
+        hourly = aggregate(bars, "1Hour", {"regular"}, ny(2026, 11, 28, 0, 0))
+        assert hourly[-1].end == ny(2026, 11, 27, 13, 0)
+        assert sessions.expected_buckets(hourly, "1Hour", {"regular"}) == 4  # 09:30-13:00 in hourly buckets
+    finally:
+        sessions.load_calendar([])

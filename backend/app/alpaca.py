@@ -85,12 +85,12 @@ class AlpacaClient:
                 raise AlpacaError(f"Alpaca returned HTTP {response.status_code}. {hint} {detail}".strip(), response.status_code)
             return response.json()
 
-    def bars_1min(self, symbol: str, start: int, end: int) -> list[Bar]:
+    def bars_1min(self, symbol: str, start: int, end: int, adjustment: str = "raw") -> list[Bar]:
         """All raw 1-minute bars for [start, end], following every page."""
         from datetime import datetime, timezone
 
         iso = lambda ts: datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        params = {"symbols": symbol, "timeframe": "1Min", "start": iso(start), "end": iso(end), "limit": 10000, "adjustment": "raw", "feed": self.settings.feed, "sort": "asc"}
+        params = {"symbols": symbol, "timeframe": "1Min", "start": iso(start), "end": iso(end), "limit": 10000, "adjustment": adjustment, "feed": self.settings.feed, "sort": "asc"}
         bars: list[Bar] = []
         while True:
             data = self._get(f"{self.settings.data_host}/v2/stocks/bars", params)
@@ -101,12 +101,12 @@ class AlpacaClient:
                 return bars
             params = {**params, "page_token": token}
 
-    def bars_multi(self, symbols: list[str], timeframe: str, start: int, end: int) -> dict[str, list[Bar]]:
+    def bars_multi(self, symbols: list[str], timeframe: str, start: int, end: int, adjustment: str = "raw") -> dict[str, list[Bar]]:
         """Raw bars for many symbols in one paginated request."""
         from datetime import datetime, timezone
 
         iso = lambda ts: datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        params = {"symbols": ",".join(symbols), "timeframe": timeframe, "start": iso(start), "end": iso(end), "limit": 10000, "adjustment": "raw", "feed": self.settings.feed, "sort": "asc"}
+        params = {"symbols": ",".join(symbols), "timeframe": timeframe, "start": iso(start), "end": iso(end), "limit": 10000, "adjustment": adjustment, "feed": self.settings.feed, "sort": "asc"}
         out: dict[str, list[Bar]] = {s: [] for s in symbols}
         while True:
             data = self._get(f"{self.settings.data_host}/v2/stocks/bars", params)
@@ -147,6 +147,11 @@ class AlpacaClient:
             if not token:
                 return actions
             params = {**params, "page_token": token}
+
+    def calendar(self, start_date: str, end_date: str) -> list[dict]:
+        """Trading days with open/close and extended-session times (Trading API GET /v2/calendar)."""
+        data = self._get(f"{self.settings.trading_host}/v2/calendar", {"start": start_date, "end": end_date})
+        return data if isinstance(data, list) else []
 
     def assets(self) -> list[dict]:
         data = self._get(f"{self.settings.trading_host}/v2/assets", {"status": "active", "asset_class": "us_equity"})

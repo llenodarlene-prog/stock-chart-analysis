@@ -9,8 +9,8 @@ type Result = { bars: number; split_time: number | null; trades: Trade[]; skippe
 
 const DEFAULTS = { side: 'long', exit_mode: 'full', stop_mode: 'swing', stop_atr: '1', target_r: '2', partial_r: '1', partial_fraction: '0.5', trail_atr: '2', risk_per_trade: '100', starting_capital: '10000', fee_per_share: '0', fee_per_order: '0', slippage_bps: '5', reentry_cooldown_bars: '3', out_of_sample_fraction: '0.3' };
 
-export default function BacktestScreen(props: { symbol: string; timeframe: string; sessions: string; zone: ZoneKey; replayAt: number | null; replayOptions: number[]; onReplay: (t: number | null) => void; data: ChartData | null; toggles: Toggles }) {
-  const { symbol, timeframe, sessions, zone, replayAt, replayOptions, onReplay, data, toggles } = props;
+export default function BacktestScreen(props: { symbol: string; timeframe: string; sessions: string; adjustment: string; zone: ZoneKey; replayAt: number | null; replayOptions: number[]; onReplay: (t: number | null) => void; data: ChartData | null; toggles: Toggles }) {
+  const { symbol, timeframe, sessions, adjustment, zone, replayAt, replayOptions, onReplay, data, toggles } = props;
   const [cfg, setCfg] = useState<Record<string, string>>(DEFAULTS);
   const [results, setResults] = useState<Record<string, Result> | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -20,7 +20,7 @@ export default function BacktestScreen(props: { symbol: string; timeframe: strin
     setRunning(true); setError(null);
     try {
       const config = Object.fromEntries(Object.entries(cfg).map(([k, v]) => [k, ['side', 'exit_mode', 'stop_mode'].includes(k) ? v : Number(v)]));
-      const r = await api<{ results: Record<string, Result> }>('/api/backtest', { method: 'POST', body: JSON.stringify({ symbol, timeframe, sessions, config }) });
+      const r = await api<{ results: Record<string, Result> }>('/api/backtest', { method: 'POST', body: JSON.stringify({ symbol, timeframe, sessions, adjustment, config }) });
       setResults(r.results);
     } catch (e) { setError((e as Error).message); } finally { setRunning(false); }
   };

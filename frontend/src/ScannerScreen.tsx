@@ -17,6 +17,9 @@ type Universe = { count: number; source_url: string | null; source_last_modified
 type Summary = { trades: number; win_rate?: number; avg_r?: number | null; avg_return_pct?: number; worst_r?: number | null; gap_exits?: number };
 type Backtest = { symbols: number; split_date: string | null; results: Record<string, Record<string, { in_sample: Summary; out_of_sample: Summary }>>; notes: string[]; errors: string[] };
 
+type Job = { state: string; phase?: string; done?: number; total?: number; error?: string; scan_id?: number };
+const SETTING_FIELDS: [string, string][] = [['min_price', 'Minimum price ($)'], ['min_iex_dollar_volume', 'Minimum 20-day IEX dollar volume ($)'], ['max_spread_pct', 'Maximum spread (%)'], ['near_resistance_atr', 'Breakout: max distance below resistance (ATR)'], ['momentum_min_rvol', 'Momentum: minimum relative volume'], ['pullback_min_atr', 'Pullback: minimum depth (ATR)'], ['max_candidates', 'Maximum candidates'], ['max_per_setup', 'Maximum per setup'], ['news_days', 'News lookback (days)'], ['swing_max_hold_days', 'Swing: maximum hold (days)'], ['slippage_bps', 'Slippage (basis points)']];
+const SETTING_DEFAULTS: Record<string, string> = { min_price: '1', min_iex_dollar_volume: '100000', max_spread_pct: '1', near_resistance_atr: '0.75', momentum_min_rvol: '1.2', pullback_min_atr: '1', max_candidates: '10', max_per_setup: '4', news_days: '3', swing_max_hold_days: '10', slippage_bps: '10' };
 const SETUP_NAMES: Record<string, string> = { developing_breakout: 'Developing breakout', momentum_continuation: 'Momentum continuation', uptrend_pullback: 'Uptrend pullback' };
 
 export default function ScannerScreen({ zone }: { zone: ZoneKey }) {
@@ -34,6 +37,26 @@ export default function ScannerScreen({ zone }: { zone: ZoneKey }) {
     try { await fn(); } catch (e) { setError((e as Error).message); } finally { setBusy(''); }
   };
   const list = () => symbols.split(/[\s,]+/).map(s => s.trim().toUpperCase()).filter(Boolean);
+  const [settings, setSettings] = useState<Record<string, string>>(() => { try { return { ...SETTING_DEFAULTS, ...JSON.parse(localStorage.getItem('scanSettings') || '{}') }; } catch { return { ...SETTING_DEFAULTS }; } });
+  const [job, setJob] = useState<Job | null>(null);
+  const config = () => Object.fromEntries(Object.entries(settings).map(([k, v]) => [k, Number(v)]));
+  const saveSetting = (k: string, v: string) => { const next = { ...settings, [k]: v }; setSettings(next); try { localStorage.setItem('scanSettings', JSON.stringify(next)); } catch { /* storage unavailable */ } };
+  // Scans run in the background on the server; poll for progress.
+  useEffect(() => {
+    let timer: number | undefined;
+    const poll = async () => {
+      try {
+        const j = await api<Job>('/api/scanner/job');
+        setJob(j);
+        if (j.state === 'running') timer = window.setTimeout(poll, 2000);
+        else if (j.state === 'done') setScan(await api<Scan>('/api/scanner/latest'));
+        else if (j.state === 'error') setError(`Scan failed: ${j.error}`);
+      } catch (e) { setError((e as Error).message); }
+    };
+    if (job?.state === 'running') timer = window.setTimeout(poll, 2000);
+    return () => window.clearTimeout(timer);
+  }, [job?.state, job?.done]);
+  useEffect(() => { api<Job>('/api/scanner/job').then(setJob).catch(() => undefined); }, []);
 
   return (
     <div>
@@ -51,10 +74,22 @@ export default function ScannerScreen({ zone }: { zone: ZoneKey }) {
         <div className="actions">
           <button onClick={() => act('universe', async () => { await api('/api/universe/refresh', { method: 'POST' }); await loadUniverse(); })} disabled={!!busy}>{busy === 'universe' ? 'Refreshing…' : 'Refresh GoTrade directory'}</button>
           <input value={symbols} onChange={e => setSymbols(e.target.value)} placeholder="Optional: limit to symbols, e.g. AAPL, MSFT" style={{ maxWidth: 320 }} aria-label="Limit scan to symbols" />
-          <button className="primary" disabled={!!busy || !universe?.count} onClick={() => act('scan', async () => { setScan(await api<Scan>('/api/scanner/run', { method: 'POST', body: JSON.stringify({ symbols: list() }) })); })}>{busy === 'scan' ? 'Scanning (first run downloads history)…' : 'Run scan'}</button>
+          <button className="primary" disabled={!!busy || !universe?.count} onClick={() => act('scan', async () => { setJob(await api<Job>('/api/scanner/run', { method: 'POST', body: JSON.stringify({ symbols: list(), config: config() }) })); })} hidden={job?.state === 'running'}>Run scan</button>
           {scan?.id && <button disabled={!!busy} onClick={() => act('reassess', async () => { setScan(await api<Scan>(`/api/scanner/${scan.id}/reassess`, { method: 'POST' })); })}>{busy === 'reassess' ? 'Checking…' : 'Reassess after news and opening gaps'}</button>}
         </div>
+        {job?.state === 'running' && (
+          <div aria-live="polite">
+            <p className="small">{job.phase}: {job.done ?? 0} of {job.total ?? '?'}. The first full scan downloads history for every stock and can take several minutes. You can keep using the other tabs.</p>
+            <div className="progress"><div style={{ width: `${job.total ? Math.min(100, ((job.done ?? 0) / job.total) * 100) : 5}%` }} /></div>
+          </div>
+        )}
         {error && <p className="banner error" role="alert">{error}</p>}
+        <details className="techdetails"><summary>Scanner settings</summary>
+          <div className="form-grid">
+            {SETTING_FIELDS.map(([k, label]) => <label key={k}>{label}<input value={settings[k]} onChange={e => saveSetting(k, e.target.value)} inputMode="decimal" /></label>)}
+          </div>
+          <div className="actions"><button className="small-btn" onClick={() => { setSettings({ ...SETTING_DEFAULTS }); try { localStorage.removeItem('scanSettings'); } catch { /* ignore */ } }}>Restore defaults</button><span className="small">Saved in this browser. Used for the next scan and backtest.</span></div>
+        </details>
       </section>
       {scan && (
         <section className="panel">
@@ -68,7 +103,7 @@ export default function ScannerScreen({ zone }: { zone: ZoneKey }) {
       <section className="panel">
         <h2>Backtest by horizon</h2>
         <p className="small">Overnight-to-opening-hour and multi-day swing trades are tested separately, per setup, on a deterministic sample spread across the whole directory (or the symbols above).</p>
-        <button disabled={!!busy || !universe?.count} onClick={() => act('bt', async () => { setBt(await api<Backtest>('/api/scanner/backtest', { method: 'POST', body: JSON.stringify({ symbols: list() }) })); })}>{busy === 'bt' ? 'Running…' : 'Run scanner backtest'}</button>
+        <button disabled={!!busy || !universe?.count} onClick={() => act('bt', async () => { setBt(await api<Backtest>('/api/scanner/backtest', { method: 'POST', body: JSON.stringify({ symbols: list(), config: config() }) })); })}>{busy === 'bt' ? 'Running…' : 'Run scanner backtest'}</button>
         {bt && (
           <>
             <p className="small">{bt.symbols} symbols. Out-of-sample from {bt.split_date ?? 'n/a'}. {bt.notes.join(' ')}</p>

@@ -136,7 +136,7 @@ export default function PlanScreen({ data, zone, toggles }: { data: ChartData; z
               <td>{p.mode} {p.side} · entry {fmtPrice(Number(p.entry))} · stop {fmtPrice(Number(p.stop))} · {p.timeframe}</td>
               <td>{p.outcome ? fmtMoney(p.outcome.planned_risk) : 'n/a'}</td>
               <td>{p.outcome ? `${fmtMoney(p.outcome.actual_pnl)} (${p.outcome.actual_r?.toFixed(2)} R)` : 'Not recorded'}</td>
-              <td><button className="small-btn" onClick={() => setForm({ ...blank(data), ...Object.fromEntries(Object.entries(p).map(([k, v]) => [k, v === null || v === undefined ? '' : typeof v === 'number' || typeof v === 'string' ? String(v) : v])), id: p.id, target1: '', target2: '' } as PlanInput)}>Edit</button>{' '}
+              <td><button className="small-btn" onClick={() => setForm({ ...blank(data), ...Object.fromEntries(Object.entries(p).map(([k, v]) => [k, v === null || v === undefined ? '' : typeof v === 'number' || typeof v === 'string' ? String(v) : v])), id: p.id, target1: (p as unknown as { targets?: { price: number }[] }).targets?.[0]?.price?.toString() ?? '', target2: (p as unknown as { targets?: { price: number }[] }).targets?.[1]?.price?.toString() ?? '' } as PlanInput)}>Edit</button>{' '}
                 <button className="small-btn" onClick={() => api(`/api/plans/${p.id}`, { method: 'DELETE' }).then(refresh)}>Delete</button></td>
             </tr>
           ))}
