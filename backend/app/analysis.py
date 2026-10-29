@@ -53,7 +53,7 @@ def _item(category: str, direction: str, text: str, value=None) -> dict:
     return {"category": category, "direction": direction, "text": text, "value": value}
 
 
-def assess(candles: list[Candle], ind: dict, cfg: AnalysisConfig, signals: list[dict], gates: dict) -> dict:
+def assess(candles: list[Candle], ind: dict, cfg: AnalysisConfig, signals: list[dict], gates: dict, timeframe: str = "") -> dict:
     completed = [c for c in candles if c.complete]
     if len(completed) < 2:
         return {"label": "neutral", "reason": "Insufficient history for an assessment.", "evidence": [], "levels": {}, "scenarios": [], "as_of": None}
@@ -124,6 +124,7 @@ def assess(candles: list[Candle], ind: dict, cfg: AnalysisConfig, signals: list[
         "trend": trend, "evidence": evidence, "supporting": supporting, "opposing": opposing,
         "warnings": [e for e in evidence if e["category"] == "momentum_warning"],
         "levels": levels, "scenarios": scenarios(levels, evidence, cfg, gates),
+        "next_steps": next_steps(label, trend["direction"], levels, recent, evidence, gates, timeframe),
         "actionable": gates["actionable"], "blocked_reasons": gates["blocked_reasons"],
         "disclaimer": "Scenarios are conditional on the stated triggers. They are not forecasts and carry no probability. Gaps and slippage can cause losses beyond a planned stop.",
     }
@@ -179,3 +180,65 @@ def explain(signal: dict) -> str:
     if signal["kind"] == "failed_breakout":
         return f"Failed breakout: close {ev.get('close'):.4f} moved back through {signal['level']:.4f} soon after the breakout."
     return signal.get("rule", "")
+
+
+def next_steps(label: str, trend: str, levels: dict, recent: list[dict], evidence: list[dict], gates: dict, timeframe: str) -> dict:
+    """Plain-language steps built only from the levels and rules above.
+    Every price here is an algorithm-derived level shown elsewhere in the
+    response; nothing new is invented. Steps stay conditional: the user decides."""
+    tf = {"1Min": "1-minute", "5Min": "5-minute", "15Min": "15-minute", "1Hour": "hourly", "1Day": "daily"}.get(timeframe, timeframe or "")
+    candle = f"{tf} candle" if tf else "candle"
+    p = lambda x: f"${x:,.2f}" if x is not None else "n/a"
+    r, s, buf, close = levels["resistance"], levels["support"], levels["buffer"] or 0.0, levels["close"]
+    up_targets = [t for t in levels["swing_highs_above"] if r is None or t > r][:2]
+    if levels["measured_move_up"]:
+        up_targets.append(levels["measured_move_up"])
+    hot = any(e["category"] == "momentum_warning" and "RSI is at or above" in e["text"] for e in evidence)
+    breakout = next((x for x in reversed(recent) if x["kind"] == "breakout" and x["direction"] == "bullish"), None)
+    failed = next((x for x in reversed(recent) if x["kind"] == "failed_breakout"), None)
+    steps: list[str] = []
+    levels_out = {"buy_trigger": None, "stop": s, "targets": up_targets, "warning_level": s - buf if s is not None else None}
+
+    if not gates["actionable"]:
+        return {
+            "status": "wait", "headline": "Don't act on this chart right now: the data isn't reliable enough yet.",
+            "steps": ["Reasons: " + " ".join(gates["blocked_reasons"]), "Refresh in a few minutes, or switch to a longer timeframe (for example daily) for more history."],
+            "levels": levels_out, "reminder": "You make the final decision. This app never places trades.",
+        }
+    if label == "bullish":
+        if breakout and close > breakout["level"]:
+            headline = f"Uptrend, and price already broke out above {p(breakout['level'])}. Better to wait for a pullback than to chase."
+            steps.append(f"Watch for price to dip back near {p(breakout['level'])} and then close above it on a {candle}. That retest is the safer possible buy point.")
+            levels_out["buy_trigger"] = breakout["level"]
+        else:
+            trigger = r + buf if r is not None else None
+            headline = "Uptrend. The possible buy point is a breakout, which hasn't happened yet."
+            steps.append(f"Watch for a {candle} to close above {p(trigger)}. That is the app's buy signal.")
+            levels_out["buy_trigger"] = trigger
+    elif label == "bearish":
+        headline = "Downtrend. The app shows no buy setup right now."
+        steps.append(f"Don't buy yet. The downtrend signal ends only if a {candle} closes above {p(r)}.")
+        if s is not None:
+            steps.append(f"If price closes below {p(s - buf)}, expect further weakness. If you already own it, that is the app's exit level.")
+    else:
+        headline = "No clear direction. Best to wait."
+        if r is not None:
+            steps.append(f"Possible buy only if a {candle} closes above {p(r + buf)}.")
+            levels_out["buy_trigger"] = r + buf
+        if s is not None:
+            steps.append(f"Warning sign if a {candle} closes below {p(s - buf)}.")
+    if label != "bearish" and levels_out["buy_trigger"] is not None:
+        if s is not None:
+            steps.append(f"If you decide to buy, the app's stop (exit if wrong) is {p(s)}. Exit if a {candle} closes below it.")
+        if up_targets:
+            steps.append("Take-profit areas: " + ", then ".join(p(t) for t in up_targets) + ". These are past turning points and a measured move, not promises.")
+        else:
+            steps.append("No take-profit area above yet. If it moves your way, raise your stop as it climbs.")
+        steps.append("Use the Entry, Exit & Price Projections tab to see how many shares fit your risk.")
+    if failed:
+        steps.append(f"Caution: a recent breakout failed near {p(failed['level'])}. Breakouts here have not held lately.")
+    if hot:
+        steps.append("The price has risen fast (RSI is high). Avoid chasing, but this alone is not a reason to sell.")
+    steps.append("Before you buy, check the company's news and confirm it is available in your GoTrade account.")
+    return {"status": label, "headline": headline, "steps": steps, "levels": levels_out,
+            "reminder": "Prices can gap past a stop, so a loss can be bigger than planned. You make the final decision; this app never places trades."}

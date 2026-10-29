@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, fmtMoney, fmtPrice, fmtTime, type ChartData, type ZoneKey } from './api';
 import Chart, { type Overlay, type Toggles } from './Chart';
+import { ChatGptButton } from './Panels';
 
 type PlanInput = { id?: number; symbol: string; timeframe: string; mode: 'plan' | 'existing'; side: 'long' | 'short'; capital: string; entry: string; shares: string; max_risk: string; stop: string; target1: string; target2: string; fee_per_share: string; fee_per_order: string; slippage_bps: string; notes: string; actual_entry: string; actual_exit: string; actual_shares: string };
 type Result = { shares: number; shares_by_risk: number | null; shares_by_capital: number | null; position_cost: number; risk_per_share: number; loss_at_stop: number; round_trip_fees: number; entry_with_slippage: number; targets: { price: number; source: string; label: string; pnl: number; reward_to_risk: number | null }[]; exit_comparison: { rule: string; pnl_if_reached: number | null; pnl_if_stopped: number; pnl_if_stopped_after_partial?: number; note?: string }[]; warnings: string[]; reminder: string };
@@ -83,7 +84,7 @@ export default function PlanScreen({ data, zone, toggles }: { data: ChartData; z
             <button className="small-btn" onClick={useAlgo('stop', levels.support)}>Stop = support</button>
           </p>
           <label className="block">Notes<textarea value={form.notes} onChange={set('notes')} rows={2} /></label>
-          <div className="actions"><button className="primary" onClick={calculate}>Calculate</button><button onClick={save}>Save plan</button><button onClick={() => { setForm(blank(data)); setResult(null); }}>New plan</button></div>
+          <div className="actions"><ChatGptButton data={data} zone={zone} extra={`Mode ${form.mode}, side ${form.side}, capital ${form.capital || 'n/a'}, max risk ${form.max_risk || 'n/a'}, entry ${form.entry || 'n/a'}, shares ${form.shares || 'auto'}, stop ${form.stop || 'n/a'}, my targets ${[form.target1, form.target2].filter(Boolean).join(', ') || 'none'}.${result ? ` App results: ${result.shares} shares, loss if stopped ${result.loss_at_stop.toFixed(2)}, targets ${result.targets.map(t => `${t.price.toFixed(2)} (${t.label}, P/L ${t.pnl.toFixed(2)})`).join('; ')}.` : ''}`} /><button className="primary" onClick={calculate}>Calculate</button><button onClick={save}>Save plan</button><button onClick={() => { setForm(blank(data)); setResult(null); }}>New plan</button></div>
           {error && <p className="banner error" role="alert">{error}</p>}
           {status && <p className="small">{status}</p>}
         </section>

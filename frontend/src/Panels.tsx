@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { chatgptPrompt, copyText } from './chatgpt';
 import { api, fmtPrice, fmtTime, type ChartData, type Evidence, type ZoneKey } from './api';
 
 export function Provenance({ data, zone, hashOk }: { data: ChartData; zone: ZoneKey; hashOk: boolean | null }) {
@@ -92,6 +93,39 @@ export function SignalPanel({ data, zone }: { data: ChartData; zone: ZoneKey }) 
       <p className="small">Signals recorded when first seen on a recent completed candle. These timestamps form the forward paper-test record.</p>
       <ul className="small">{logged.map(s => <li key={s.id}>{fmtTime(s.bar_time, zone)} · {s.kind} ({s.variant}, {s.direction}) · first seen {fmtTime(Math.floor(s.first_seen_at), zone)} · {s.actionable ? 'actionable' : `blocked: ${s.blocked_reasons.join(' ')}`}</li>)}
         {!logged.length && <li>No live signals recorded yet.</li>}</ul>
+    </section>
+  );
+}
+
+export function ChatGptButton({ data, zone, extra }: { data: ChartData; zone: ZoneKey; extra?: string }) {
+  const [label, setLabel] = useState('Copy for ChatGPT');
+  return (
+    <button onClick={async () => {
+      const ok = await copyText(chatgptPrompt(data, zone, extra));
+      setLabel(ok ? 'Copied. Paste it into ChatGPT and add your question' : 'Copy blocked by the browser');
+      window.setTimeout(() => setLabel('Copy for ChatGPT'), 4000);
+    }}>{label}</button>
+  );
+}
+
+export function NextStepsPanel({ data, zone }: { data: ChartData; zone: ZoneKey }) {
+  const n = data.assessment.next_steps;
+  if (!n) return null;
+  const lv = n.levels;
+  const p = (x: number | null) => (x === null ? 'n/a' : x.toLocaleString('en-US', { style: 'currency', currency: 'USD' }));
+  return (
+    <section className={`panel simple ${n.status}`}>
+      <p className="small">{data.symbol} · {data.timeframe} chart · as of {fmtTime(data.provenance.last_completed_time, zone)} · last price {p(data.assessment.levels.close)}</p>
+      <h2>{n.headline}</h2>
+      <div className="levels-strip">
+        <div><span>Possible buy point</span><b>{p(lv.buy_trigger)}</b><small>only if a candle closes above it</small></div>
+        <div><span>Stop (exit if wrong)</span><b>{p(lv.stop)}</b><small>close below it</small></div>
+        <div><span>Take-profit areas</span><b>{lv.targets.length ? lv.targets.map(p).join(' → ') : 'n/a'}</b><small>not guaranteed</small></div>
+      </div>
+      <h3>What to do next</h3>
+      <ol className="steps">{n.steps.map(s => <li key={s}>{s}</li>)}</ol>
+      <p className="small">{n.reminder}</p>
+      <div className="actions"><ChatGptButton data={data} zone={zone} /><span className="small">Copies this chart's numbers so ChatGPT can answer questions about them. Free, using your own ChatGPT.</span></div>
     </section>
   );
 }

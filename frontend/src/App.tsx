@@ -5,7 +5,7 @@ import { candleHash } from './hash';
 import PlanScreen from './PlanScreen';
 import BacktestScreen from './BacktestScreen';
 import ScannerScreen from './ScannerScreen';
-import { AssessmentPanel, Provenance, SignalPanel } from './Panels';
+import { AssessmentPanel, NextStepsPanel, Provenance, SignalPanel } from './Panels';
 
 const REFRESH_MS = 30_000;
 
@@ -69,7 +69,8 @@ export default function App() {
         {error && <p className="banner error" role="alert">{error}</p>}
         {data?.error && <p className="banner error" role="alert">Data request failed: {data.error}{data.candles.length ? ' Showing cached candles from the last successful fetch.' : ''}</p>}
         {!symbol && <p className="banner info">Search for a symbol or pick one from your watchlist to load its chart.</p>}
-        {data && <Provenance data={data} zone={zone} hashOk={hashOk} />}
+        {data && screen === 'chart' && data.candles.length > 0 && <NextStepsPanel data={data} zone={zone} />}
+        {data && <details className="techdetails"><summary>Data source and quality {hashOk ? '✓' : ''}</summary><Provenance data={data} zone={zone} hashOk={hashOk} /></details>}
         {data && data.candles.length === 0 && <p className="banner warn">No candles returned for {symbol} on the {data.feed.toUpperCase()} feed in this range. Nothing has been substituted.</p>}
         {data && data.candles.length > 0 && screen !== 'backtest' && screen !== 'scanner' && (
           <>
@@ -80,10 +81,13 @@ export default function App() {
           </>
         )}
         {data && screen === 'chart' && data.candles.length > 0 && (
-          <div className="grid">
-            <AssessmentPanel data={data} zone={zone} />
-            <SignalPanel data={data} zone={zone} />
-          </div>
+          <details className="techdetails">
+            <summary>Technical details: evidence, scenarios and signal history</summary>
+            <div className="grid">
+              <AssessmentPanel data={data} zone={zone} />
+              <SignalPanel data={data} zone={zone} />
+            </div>
+          </details>
         )}
         {data && screen === 'plan' && <PlanScreen data={data} zone={zone} toggles={toggles} />}
         {screen === 'scanner' && <ScannerScreen zone={zone} />}

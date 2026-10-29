@@ -119,7 +119,7 @@ def build(symbol: str, timeframe: str, session_mode: str, now: int | None = None
         s["comparability_caveat"] = any(c["date"] <= sessions.utc_iso(s["time"])[:10] for c in comparability)
         if recent and not until and refresh:
             store.record_signal(symbol, timeframe, session_mode, s, sessions.data_hash(candles))
-    assessment = analysis.assess(candles, ind, cfg, signals, gates)
+    assessment = analysis.assess(candles, ind, cfg, signals, gates, timeframe)
     swing_points = [asdict(sw) for sw in swings(completed, cfg)]
     last_complete = completed[-1] if completed else None
     return {

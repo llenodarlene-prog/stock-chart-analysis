@@ -72,3 +72,17 @@ def test_api_errors_are_shown_not_replaced(monkeypatch):
 def test_no_order_endpoints_exist():
     paths = {route.path for route in main.app.routes}
     assert not any("order" in p for p in paths)
+
+
+def test_plain_next_steps_use_only_existing_levels(monkeypatch):
+    monkeypatch.setattr(main.time, "time", lambda: ny(2026, 10, 26, 15, 0))
+    data = TestClient(main.app).get("/api/candles", params={"symbol": "AIOK", "timeframe": "5Min"}).json()
+    plain = data["assessment"]["next_steps"]
+    assert plain["headline"] and plain["steps"]
+    levels = data["assessment"]["levels"]
+    allowed = {levels["resistance"], levels["support"], levels["measured_move_up"], *levels["swing_highs_above"]}
+    if levels["resistance"] is not None:
+        allowed.add(levels["resistance"] + levels["buffer"])
+    for key in ("buy_trigger", "stop"):
+        assert plain["levels"][key] is None or plain["levels"][key] in allowed or any(abs(plain["levels"][key] - s["level"]) < 1e-9 for s in data["signals"])
+    assert "probab" not in " ".join(plain["steps"]).lower()
