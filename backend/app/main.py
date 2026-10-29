@@ -120,6 +120,9 @@ def build(symbol: str, timeframe: str, session_mode: str, now: int | None = None
         if recent and not until and refresh:
             store.record_signal(symbol, timeframe, session_mode, s, sessions.data_hash(candles))
     assessment = analysis.assess(candles, ind, cfg, signals, gates, timeframe)
+    if assessment.get("next_steps"):
+        history = analysis.history_stats(completed, ind, signals, cfg)
+        assessment["next_steps"]["scenarios"] = analysis.simple_scenarios(assessment["levels"], history, timeframe)
     swing_points = [asdict(sw) for sw in swings(completed, cfg)]
     last_complete = completed[-1] if completed else None
     return {

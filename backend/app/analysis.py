@@ -242,3 +242,81 @@ def next_steps(label: str, trend: str, levels: dict, recent: list[dict], evidenc
     steps.append("Before you buy, check the company's news and confirm it is available in your GoTrade account.")
     return {"status": label, "headline": headline, "steps": steps, "levels": levels_out,
             "reminder": "Prices can gap past a stop, so a loss can be bigger than planned. You make the final decision; this app never places trades."}
+
+
+MIN_HISTORY_CASES = 20
+
+
+def history_stats(completed: list[Candle], ind: dict, signals: list[dict], cfg: AnalysisConfig) -> dict:
+    """Measured outcomes of past signals on these same candles, using the
+    backtester (next-candle fills, stop assumed first, 2R target, slippage).
+    These are counts from history, not predictions."""
+    from .backtest import run
+    from .config import BacktestConfig
+
+    out = {}
+    for key, side, variant in (("early", "long", "early"), ("confirmed", "long", "confirmed"), ("retest", "long", "retest"), ("breakdown", "short", "confirmed")):
+        trades = run(completed, ind, signals, cfg, BacktestConfig(side=side, entry_variant=variant))["trades"]
+        n = len(trades)
+        target = sum(1 for t in trades if t["exit_reason"] == "target")
+        stopped = sum(1 for t in trades if t["exit_reason"] in ("stop", "gap through stop"))
+        out[key] = {
+            "cases": n, "enough": n >= MIN_HISTORY_CASES,
+            "reached_target_pct": target / n * 100 if n else None,
+            "stopped_pct": stopped / n * 100 if n else None,
+            "avg_r": sum(t["r_multiple"] for t in trades) / n if n else None,
+        }
+    return out
+
+
+def _history_line(h: dict, what: str) -> str:
+    if not h["cases"]:
+        return f"Past results on this chart: no past {what} to measure."
+    if not h["enough"]:
+        return f"Past results on this chart: only {h['cases']} past {what}. Too few to give a meaningful percentage (needs {MIN_HISTORY_CASES})."
+    return (f"Past results on this chart: {h['cases']} past {what}. {h['reached_target_pct']:.0f}% reached the 2R target first, "
+            f"{h['stopped_pct']:.0f}% hit the stop first, average result {h['avg_r']:+.2f}R. This is history on this stock and timeframe, not a prediction.")
+
+
+def simple_scenarios(levels: dict, history: dict, timeframe: str) -> list[dict]:
+    tf = {"1Min": "1-minute", "5Min": "5-minute", "15Min": "15-minute", "1Hour": "hourly", "1Day": "daily"}.get(timeframe, timeframe)
+    p = lambda x: f"${x:,.2f}" if x is not None else "n/a"
+    r, s, buf = levels["resistance"], levels["support"], levels["buffer"] or 0.0
+    ups = [t for t in levels["swing_highs_above"] if r is None or t > r][:2]
+    if levels["measured_move_up"]:
+        ups.append(levels["measured_move_up"])
+    downs = [t for t in levels["swing_lows_below"] if s is None or t < s][:2]
+    if levels["measured_move_down"]:
+        downs.append(levels["measured_move_down"])
+    out = []
+    if r is not None:
+        risk = (r + buf) - s if s is not None else None
+        out.append({
+            "name": "Breakout up", "tone": "bullish",
+            "what": f"A {tf} candle closes above {p(r + buf)}.",
+            "entries": [
+                {"label": "Early entry (weaker)", "text": f"Buy on the first close above {p(r)}. Earlier, but fails more often.", "history": _history_line(history["early"], "early breakouts")},
+                {"label": "Confirmed entry", "text": f"Buy after a close above {p(r + buf)} with above-normal volume. Fill at the next candle's open.", "history": _history_line(history["confirmed"], "confirmed breakouts")},
+                {"label": "Retest entry (safer)", "text": f"Wait for price to dip back near {p(r)} and close above it again, then buy.", "history": _history_line(history["retest"], "retests")},
+            ],
+            "exits": [
+                f"Stop: exit if a candle closes below {p(s)}." if s is not None else "Stop: no confirmed support yet. Set your own stop before entering.",
+                ("Take profit: " + ", then ".join(p(t) for t in ups) + ".") if ups else (f"Take profit: 2R from entry, about {p(r + buf + 2 * risk)}." if risk and risk > 0 else "Take profit: no structure above yet."),
+                "Or sell half at the first target, move the stop to your entry price, and let the rest run with a trailing stop.",
+                f"Cancel the idea if price closes back below {p(r - buf)} within a few candles (failed breakout).",
+            ],
+        })
+    out.append({
+        "name": "Stays in range", "tone": "neutral",
+        "what": f"Candles keep closing between {p(s)} and {p(r)}.",
+        "entries": [{"label": "No trade", "text": "Wait. Nothing is confirmed while price stays inside the range.", "history": ""}],
+        "exits": [f"If you already own it, keep your stop at {p(s)}."] if s is not None else [],
+    })
+    if s is not None:
+        out.append({
+            "name": "Breakdown", "tone": "bearish",
+            "what": f"A {tf} candle closes below {p(s - buf)}.",
+            "entries": [{"label": "Don't buy", "text": "A breakdown means the chart no longer supports buying.", "history": _history_line(history["breakdown"], "breakdowns (measured as falls to 2R below)")}],
+            "exits": [f"If you own it: this is the exit signal from the app's rules."] + ([("Next support areas below: " + ", then ".join(p(t) for t in downs) + ".")] if downs else []),
+        })
+    return out

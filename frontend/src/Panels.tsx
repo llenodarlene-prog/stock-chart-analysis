@@ -124,6 +124,20 @@ export function NextStepsPanel({ data, zone }: { data: ChartData; zone: ZoneKey 
       </div>
       <h3>What to do next</h3>
       <ol className="steps">{n.steps.map(s => <li key={s}>{s}</li>)}</ol>
+      {n.scenarios && n.scenarios.length > 0 && (
+        <>
+          <h3>Possible scenarios, with entry and exit ideas</h3>
+          <div className="grid3">{n.scenarios.map(sc => (
+            <div key={sc.name} className={`scenario simple-sc ${sc.tone}`}>
+              <h4>{sc.name}</h4>
+              <p><b>If:</b> {sc.what}</p>
+              {sc.entries.map(e => <div key={e.label} className="entry"><p><b>{e.label}:</b> {e.text}</p>{e.history && <p className="small history">{e.history}</p>}</div>)}
+              {sc.exits.length > 0 && <><p><b>Exit plan:</b></p><ul>{sc.exits.map(x => <li key={x}>{x}</li>)}</ul></>}
+            </div>
+          ))}</div>
+          <p className="small">The percentages are counts of what happened on this stock and timeframe in the loaded history, tested with next-candle fills and slippage. They are not odds for the future.</p>
+        </>
+      )}
       <p className="small">{n.reminder}</p>
       <div className="actions"><ChatGptButton data={data} zone={zone} /><span className="small">Copies this chart's numbers so ChatGPT can answer questions about them. Free, using your own ChatGPT.</span></div>
     </section>

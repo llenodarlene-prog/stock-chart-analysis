@@ -86,3 +86,13 @@ def test_plain_next_steps_use_only_existing_levels(monkeypatch):
     for key in ("buy_trigger", "stop"):
         assert plain["levels"][key] is None or plain["levels"][key] in allowed or any(abs(plain["levels"][key] - s["level"]) < 1e-9 for s in data["signals"])
     assert "probab" not in " ".join(plain["steps"]).lower()
+
+
+def test_scenarios_report_measured_history_not_invented_odds(monkeypatch):
+    monkeypatch.setattr(main.time, "time", lambda: ny(2026, 10, 26, 15, 0))
+    data = TestClient(main.app).get("/api/candles", params={"symbol": "AIOK", "timeframe": "5Min"}).json()
+    scenarios = data["assessment"]["next_steps"]["scenarios"]
+    assert [s["name"] for s in scenarios][0] in ("Breakout up", "Stays in range")
+    lines = [e["history"] for s in scenarios for e in s["entries"] if e["history"]]
+    assert lines and all(l.startswith("Past results on this chart") for l in lines)
+    assert all(("Too few" in l) or ("no past" in l) or ("not a prediction" in l) for l in lines)

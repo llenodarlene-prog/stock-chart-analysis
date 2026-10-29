@@ -20,6 +20,7 @@ export function chatgptPrompt(data: ChartData, zone: ZoneKey, extra?: string): s
     '',
     `App assessment: ${a.label}. ${a.reason}`,
     n ? `App summary: ${n.headline}\nApp next steps:\n${n.steps.map(s => `- ${s}`).join('\n')}` : '',
+    n?.scenarios ? `App scenarios:\n${n.scenarios.map(sc => `- ${sc.name}: if ${sc.what} ${sc.entries.map(e => `${e.label}: ${e.text} ${e.history}`).join(' ')} Exits: ${sc.exits.join(' ')}`).join('\n')}` : '',
     '',
     `Levels: resistance ${fmtPrice(L.resistance)}, support ${fmtPrice(L.support)}, breakout buffer ${fmtPrice(L.buffer)}, ATR ${fmtPrice(L.atr)}`,
     `Indicators: EMA ${data.config.ema_fast} ${val('ema_fast')}, EMA ${data.config.ema_slow} ${val('ema_slow')}, RSI ${val('rsi', 1)}, MACD histogram ${val('macd_hist', 4)}, VWAP ${val('vwap')}, relative volume ${val('rvol')}x`,

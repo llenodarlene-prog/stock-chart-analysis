@@ -5,7 +5,8 @@ export type Signal = { kind: string; variant: string; direction: string; time: n
 export type Levels = { resistance: number | null; support: number | null; buffer: number; atr: number | null; close: number; swing_highs_above: number[]; swing_lows_below: number[]; measured_move_up: number | null; measured_move_down: number | null };
 export type Scenario = { name: string; trigger: string; targets: { price: number | null; source: string }[]; invalidation: string; supporting_now: string[]; opposing_now: string[]; actionable: boolean };
 export type Assessment = { label: string; reason: string; as_of: number | null; trend?: { direction: string; reason: string }; evidence: Evidence[]; supporting?: Evidence[]; opposing?: Evidence[]; warnings?: Evidence[]; levels: Levels; scenarios: Scenario[]; next_steps?: NextSteps; actionable?: boolean; blocked_reasons?: string[]; disclaimer?: string };
-export type NextSteps = { status: string; headline: string; steps: string[]; levels: { buy_trigger: number | null; stop: number | null; targets: number[]; warning_level: number | null }; reminder: string };
+export type NextSteps = { status: string; headline: string; steps: string[]; levels: { buy_trigger: number | null; stop: number | null; targets: number[]; warning_level: number | null }; reminder: string; scenarios?: SimpleScenario[] };
+export type SimpleScenario = { name: string; tone: string; what: string; entries: { label: string; text: string; history: string }[]; exits: string[] };
 export type Swing = { kind: string; index: number; confirmed_index: number; price: number; time: number; confirmed_time: number };
 export type ChartData = {
   symbol: string; timeframe: string; sessions: string; feed: string; feed_label: string; adjustment: string; volume_note: string;
